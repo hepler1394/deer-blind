@@ -1,0 +1,670 @@
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ======= bottom instrument strip ======= -->
+  <footer class="strip" aria-hidden="true">
+    <span>BLIND v0.1</span><span class="sep">|</span>
+    <span id="strip-mode">feed: mock</span><span class="sep">|</span>
+    <span id="strip-run">no active run</span>
+    <span class="spacer"></span>
+    <span class="st-tokens" id="strip-tokens">burn 0 tok</span><span class="sep">|</span>
+    <span id="strip-note">quiet in the field</span>
+  </footer>
+</div>
+
+<div id="toasts" aria-live="polite"></div>
+
+<script>
+/* =========================================================================
+   Deer Blind — a field console for DeerFlow 2.0
+   Single file. Mock feed by default; Live adapter targets a real gateway.
+   ========================================================================= */
+'use strict';
+
+/* ---------- tiny utils ---------- */
+const $  = (s, r=document) => r.querySelector(s);
+const $$ = (s, r=document) => [...r.querySelectorAll(s)];
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmtTok = n => n >= 1e6 ? (n/1e6).toFixed(1).replace(/\.0$/,'')+'M' : n >= 1e3 ? (n/1e3).toFixed(1).replace(/\.0$/,'')+'k' : String(n|0);
+const fmtNum = n => n.toLocaleString('en-US');
+const fmtBytes = n => n >= 1048576 ? (n/1048576).toFixed(1)+' MB' : n >= 1024 ? (n/1024).toFixed(1)+' KB' : n+' B';
+const fmtClock = d => d.toTimeString().slice(0,8);
+const fmtT = ts => new Date(ts).toTimeString().slice(0,8);
+const fmtAgo = ts => { const s=(Date.now()-ts)/1e3; if(s<60) return 'just now';
+  if(s<3600) return `${Math.floor(s/60)}m ago`; if(s<86400) return `${Math.floor(s/3600)}h ago`;
+  return `${Math.floor(s/86400)}d ago`; };
+const fmtDur = ms => { const s=Math.floor(ms/1e3);
+  return s<60 ? `${s}s` : `${Math.floor(s/60)}m ${String(s%60).padStart(2,'0')}s`; };
+function mulberry(seed){ return function(){ let t = seed += 0x6D2B79F5;
+  t = Math.imul(t ^ t>>>15, t | 1); t ^= t + Math.imul(t ^ t>>>7, t | 61);
+  return ((t ^ t>>>14) >>> 0) / 4294967296; }; }
+const debounce=(fn,ms)=>{let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms)}};
+
+/* markdown, the 5%-of-commonmark-you-actually-need edition */
+function md(src){
+  src = String(src).replace(/\r\n/g,'\n');
+  const blocks = []; // stash code fences
+  src = src.replace(/```(\w*)\n([\s\S]*?)```/g, (_,lang,code)=>{
+    blocks.push(`<pre><code>${esc(code.replace(/\n$/,''))}</code></pre>`);
+    return `\x00B${blocks.length-1}\x00`; });
+  const inline = t => esc(t)
+    .replace(/`([^`]+)`/g,'<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>')
+    .replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s).,;:!?]|$)/g,'$1<em>$2</em>')
+    .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
+  const lines = src.split('\n'); const out = [];
+  let i = 0;
+  while (i < lines.length){
+    const L = lines[i];
+    if (/^\x00B\d+\x00$/.test(L.trim())){ out.push(L.trim()); i++; continue; }
+    if (/^\s*$/.test(L)){ i++; continue; }
+    let m;
+    if (m = L.match(/^(#{1,3})\s+(.*)/)){ out.push(`<h${m[1].length}>${inline(m[2])}</h${m[1].length}>`); i++; continue; }
+    if (/^---\s*$/.test(L)){ out.push('<hr>'); i++; continue; }
+    if (/^\s*>\s?/.test(L)){ const b=[]; while(i<lines.length && /^\s*>\s?/.test(lines[i])){ b.push(lines[i].replace(/^\s*>\s?/,'')); i++; }
+      out.push(`<blockquote>${b.map(inline).join('<br>')}</blockquote>`); continue; }
+    if (/^\s*[-*]\s+/.test(L)){ const items=[]; while(i<lines.length && (/^\s*[-*]\s+/.test(lines[i]) || (/^\s{2,}\S/.test(lines[i]) && items.length))){
+        if (/^\s*[-*]\s+/.test(lines[i])) items.push(lines[i].replace(/^\s*[-*]\s+/,'')); else items[items.length-1] += ' '+lines[i].trim(); i++; }
+      out.push(`<ul>${items.map(x=>`<li>${inline(x)}</li>`).join('')}</ul>`); continue; }
+    if (/^\s*\d+\.\s+/.test(L)){ const items=[]; while(i<lines.length && (/^\s*\d+\.\s+/.test(lines[i]) || (/^\s{2,}\S/.test(lines[i]) && items.length))){
+        if (/^\s*\d+\.\s+/.test(lines[i])) items.push(lines[i].replace(/^\s*\d+\.\s+/,'')); else items[items.length-1] += ' '+lines[i].trim(); i++; }
+      out.push(`<ol>${items.map(x=>`<li>${inline(x)}</li>`).join('')}</ol>`); continue; }
+    if (/^\s*\|.*\|\s*$/.test(L) && i+1<lines.length && /^\s*\|[\s:|-]+\|\s*$/.test(lines[i+1])){
+      const head = L.split('|').slice(1,-1).map(c=>c.trim()); i += 2; const rows=[];
+      while(i<lines.length && /^\s*\|.*\|\s*$/.test(lines[i])){ rows.push(lines[i].split('|').slice(1,-1).map(c=>c.trim())); i++; }
+      out.push(`<table><thead><tr>${head.map(h=>`<th>${inline(h)}</th>`).join('')}</tr></thead><tbody>${
+        rows.map(r=>`<tr>${r.map(c=>`<td>${inline(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`); continue; }
+    const para=[]; while(i<lines.length && !/^\s*$/.test(lines[i]) && !/^(#{1,3}\s|---\s*$|\s*[-*]\s|\s*\d+\.\s|\s*>|\s*\|.*\|\s*$|\x00B)/.test(lines[i])){ para.push(lines[i]); i++; }
+    if (para.length) out.push(`<p>${inline(para.join(' '))}</p>`); else i++;
+  }
+  return out.join('\n').replace(/\x00B(\d+)\x00/g, (_,n)=>blocks[+n]);
+}
+
+/* ---------- state ---------- */
+const S = {
+  mode: 'mock',                 // 'mock' | 'live'
+  gatewayUrl: 'http://localhost:2026',
+  liveOk: false,
+  view: 'ops',
+  threads: [],                  // {id,title,createdAt,status,messages:[],runIds:[]}
+  runs: {},                     // runId -> {threadId,status,startedAt,endedAt,agents:[],events:[],tokens,toolCalls,tokSeries:[]}
+  activeThreadId: null,
+  watchRunId: null,             // what Telemetry is pointed at
+  feedFilter: 'all',
+  selArtifact: null,
+  totalTokens: 0,
+  models: [], skills: [], memory: null, mcp: null,
+  composerModel: null, composerSkills: new Set(['deep-research']),
+  timers: new Set(),
+};
+
+/* ---------- mock catalog ---------- */
+const MOCK_MODELS = [
+  { name:'deepseek-chat',      display_name:'DeepSeek V3',        provider:'deepseek',  ctx:128000 },
+  { name:'kimi-k2',            display_name:'Kimi K2',            provider:'moonshot',  ctx:256000 },
+  { name:'gpt-5.2',            display_name:'GPT-5.2',            provider:'openai',    ctx:400000 },
+  { name:'qwen3-32b-local',    display_name:'Qwen3 32B (ollama)', provider:'ollama',    ctx:32768 },
+];
+const MOCK_SKILLS = [
+  { id:'deep-research', name:'Deep research', desc:'Multi-pass web recon with cited sources and a synthesis stage.', enabled:true,  builtin:true },
+  { id:'report-writer', name:'Report writer', desc:'Long-form markdown reports with charts pulled from analysis runs.', enabled:true,  builtin:true },
+  { id:'slide-deck',    name:'Slide deck',    desc:'Outline first, then a styled deck exported through the sandbox.', enabled:true,  builtin:true },
+  { id:'web-build',     name:'Web build',     desc:'Scaffold and serve small sites inside the sandbox with live preview.', enabled:false, builtin:true },
+  { id:'podcast-mini',  name:'Podcast mini',  desc:'Transcribe, chapter and summarize audio dropped into a thread.', enabled:false, builtin:false },
+];
+const MOCK_MEMORY = {
+  profile: [
+    ['Prefers', 'terse summaries first, detail on request'],
+    ['Timezone', 'America/Chicago'],
+    ['Default report format', 'markdown with source table'],
+    ['Recurring topic', 'retail media / ad-tech market scans'],
+  ],
+  projects: [
+    ['retail-media-scan', 'network CPM benchmarks live in artifacts/sources.json'],
+    ['snack-brand-site', 'brand palette locked: pine, blaze orange, cream'],
+  ],
+  stats: { entries: 23, lastReload: Date.now() - 1000*60*47, store: 'sqlite (local)' },
+};
+const MOCK_MCP = {
+  servers: {
+    'tavily-search': { transport:'stdio', command:'npx tavily-mcp', enabled:true },
+    'github':        { transport:'stdio', command:'npx @modelcontextprotocol/server-github', enabled:true },
+    'filesystem':    { transport:'stdio', command:'mcp-server-fs --root ~/deer-work', enabled:false },
+  },
+};
+
+/* ---------- mock artifact bodies ---------- */
+const ART_REPORT = `# US retail media networks — field scan, July 2026
+
+Six networks now clear $1B in annual ad revenue. The growth story is
+splitting in two: marketplaces with strong first-party checkout data keep
+compounding, while grocery-anchored networks are stalling on measurement
+disputes and thin on-site inventory.
+
+## Where the spend is going
+
+| Network | 2025 est. revenue | YoY | Signal |
+| --- | --- | --- | --- |
+| Amazon Ads | $56.2B | +18% | still absorbs ~3/4 of category spend |
+| Walmart Connect | $4.4B | +26% | Vizio close adds CTV inventory |
+| Instacart | $1.1B | +9% | growth cooling as basket sizes flatten |
+| Target Roundel | $0.9B | +11% | leaning on in-store screens |
+| Kroger Precision | $0.6B | +7% | measurement dispute with two majors |
+| Chewy Ads | $0.4B | +31% | fastest riser off a small base |
+
+## Three things worth watching
+
+1. **Off-site is the battleground.** Every network above now resells its
+   audience graph into open-web DSPs; take-rates there are half of on-site.
+2. **In-store retail media is finally real** — Target and Kroger both report
+   screen networks at scale, but neither shares verified impression counts.
+3. **Measurement consolidation.** Three of the six now accept the same
+   third-party verification stack, up from zero in 2024.
+
+> Working note from analyst run: CPM deltas in \`sources.json\` are
+> computed from public rate cards, not negotiated rates — treat as ceiling.
+
+## Method
+
+Two scout passes (12 sources, 9 kept), one sandbox analysis pass over the
+collected tables, one synthesis pass. Full trail in the run telemetry.
+`;
+const ART_CHART_HTML = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Spend by network</title>
+<style>body{font:13px/1.5 system-ui;margin:24px;background:#fff;color:#111}
+h1{font-size:15px;margin:0 0 4px}p{color:#666;margin:0 0 16px;font-size:12px}
+.bar{display:flex;align-items:center;gap:10px;margin:7px 0}
+.bar b{width:130px;font-weight:500;font-size:12px;text-align:right}
+.bar i{display:block;height:16px;background:#2F5D3A;border-radius:0 3px 3px 0}
+.bar span{font-size:11px;color:#555}</style></head><body>
+<h1>US retail media — est. 2025 ad revenue</h1><p>Amazon excluded for scale (est. $56.2B)</p>
+<div class="bar"><b>Walmart Connect</b><i style="width:352px"></i><span>$4.4B</span></div>
+<div class="bar"><b>Instacart</b><i style="width:88px"></i><span>$1.1B</span></div>
+<div class="bar"><b>Target Roundel</b><i style="width:72px"></i><span>$0.9B</span></div>
+<div class="bar"><b>Kroger Precision</b><i style="width:48px"></i><span>$0.6B</span></div>
+<div class="bar"><b>Chewy Ads</b><i style="width:32px"></i><span>$0.4B</span></div>
+</body></html>`;
+const ART_SOURCES = JSON.stringify({
+  collected: 12, kept: 9, dropped: ["duplicate coverage x2", "paywalled, no cache"],
+  sources: [
+    { id: 1, title: "eMarketer retail media forecast update", date: "2026-06-11", used_for: "revenue table" },
+    { id: 2, title: "Walmart Q1 FY27 earnings call transcript", date: "2026-05-15", used_for: "Connect growth, Vizio" },
+    { id: 3, title: "Instacart shareholder letter Q1 2026", date: "2026-05-06", used_for: "growth cooling" },
+    { id: 4, title: "Kroger Precision / verification dispute coverage", date: "2026-04-22", used_for: "measurement section" },
+    { id: 5, title: "Target Roundel in-store screens press release", date: "2026-03-18", used_for: "in-store push" },
+    { id: 6, title: "Chewy Ads launch retrospective", date: "2026-02-09", used_for: "riser note" },
+    { id: 7, title: "IAB retail media measurement framework v2", date: "2026-01-27", used_for: "consolidation point" },
+    { id: 8, title: "Public rate cards (6 networks)", date: "2026-06-30", used_for: "CPM deltas" },
+    { id: 9, title: "OpenRTB off-site reseller integration notes", date: "2026-05-29", used_for: "off-site take-rates" }
+  ]
+}, null, 2);
+const ART_SLIDES = `# Retail media scan — deck outline
+
+1. Cold open: six networks past $1B — but two speeds
+2. The table (revenue + YoY, one slide, no clutter)
+3. Off-site take-rate squeeze (diagram)
+4. In-store screens: real inventory, unverified counts
+5. Measurement: 3 of 6 on one stack — what changes
+6. Watchlist + method note
+`;
+
+/* ---------- mock run scripting ---------- */
+let _id = 100;
+const nid = p => `${p}_${(_id++).toString(36)}`;
+
+function seedMockWorld(){
+  const now = Date.now();
+  /* finished demo thread with a full run trail */
+  const t1 = { id: nid('th'), title: 'Map the US retail media networks — who is growing, who is stalling',
+    createdAt: now - 1000*60*38, status: 'ok', messages: [], runIds: [] };
+  const r1 = mkRun(t1.id, now - 1000*60*38);
+  r1.status='ok'; r1.endedAt = now - 1000*60*31;
+  r1.agents = [
+    mkAgent('atlas','lead','synthesize the scan; delegate recon and analysis', 'ok', 41200, .43, 0),
+    mkAgent('scout-1','web','network revenue + growth: earnings, forecasts','ok', 28400, .31, 1),
+    mkAgent('scout-2','web','measurement disputes, in-store, off-site moves','ok', 24100, .27, 1),
+    mkAgent('analyst','sandbox','normalize tables, compute CPM deltas','ok', 15800, .22, 1),
+    mkAgent('scribe','report','draft field scan + deck outline','ok', 19600, .35, 1),
+  ];
+  r1.tokens = 129100; r1.toolCalls = 23;
+  r1.tokSeries = [3.1,7.8,12.4,16.0,14.2,18.9,22.6,17.3,11.0,8.4,5.2,2.3].map(v=>v*1000);
+  const T0 = r1.startedAt;
+  r1.events = [
+    ev(T0+1200,'atlas','sys','run accepted — decomposing brief into 4 work items'),
+    ev(T0+4200,'atlas','tool','spawn(scout-1, scout-2) — parallel recon'),
+    ev(T0+6900,'scout-1','tool','search("retail media network revenue 2025 2026 forecast")'),
+    ev(T0+7300,'scout-2','tool','search("kroger precision measurement dispute verification")'),
+    ev(T0+21000,'scout-1','info','9 of 12 sources kept — 2 duplicates, 1 paywalled'),
+    ev(T0+24500,'scout-2','warn','rate-limited on one publisher — backing off 20s, queue intact'),
+    ev(T0+61000,'scout-2','info','recovered; measurement + in-store notes complete'),
+    ev(T0+63000,'atlas','tool','spawn(analyst) — tables ready for normalization'),
+    ev(T0+64800,'analyst','tool','bash: python normalize.py --in sources.json'),
+    ev(T0+92000,'analyst','info','CPM deltas computed from public rate cards (ceiling values)'),
+    ev(T0+95000,'atlas','tool','spawn(scribe) — synthesis inputs assembled'),
+    ev(T0+96500,'scribe','tool','write_file(artifacts/retail-media-scan.md)'),
+    ev(T0+128000,'scribe','tool','write_file(artifacts/spend-by-network.html)'),
+    ev(T0+131000,'scribe','tool','write_file(artifacts/deck-outline.md)'),
+    ev(T0+134000,'atlas','info','synthesis pass over 4 agent reports — 129.1k tokens total'),
+    ev(T0+139000,'atlas','sys','run complete — 4 artifacts, 23 tool calls, 0 failures'),
+  ];
+  r1.artifacts = [
+    art('retail-media-scan.md','md',ART_REPORT, t1.id),
+    art('spend-by-network.html','html',ART_CHART_HTML, t1.id),
+    art('sources.json','json',ART_SOURCES, t1.id),
+    art('deck-outline.md','md',ART_SLIDES, t1.id),
+  ];
+  t1.messages = [
+    { who:'you', ts:T0-2000, body:'Map the US retail media networks. Who is actually growing, who is stalling, and what should we watch next quarter? Table plus a short deck outline.' },
+    { who:'atlas', ts:T0+139000, body:
+`Scan complete — two speeds in the market.
+
+**Growing:** Walmart Connect (+26%, CTV via Vizio) and Chewy (+31% off a small base). **Stalling:** Instacart (+9%, baskets flat) and Kroger (+7%, stuck in a measurement dispute with two major CPGs).
+
+Four artifacts in the tray: the field scan, a spend chart, the source trail, and a 6-slide outline. The CPM deltas are rate-card ceilings, not negotiated — flagged in the report.` },
+  ];
+  t1.runIds = [r1.id];
+
+  /* failed run thread — the error path, honestly */
+  const t2 = { id: nid('th'), title: 'Transcribe + chapter podcast ep. 214', createdAt: now - 1000*60*12, status:'crit', messages: [], runIds: [] };
+  const r2 = mkRun(t2.id, now - 1000*60*12);
+  r2.status='crit'; r2.endedAt = now - 1000*60*10;
+  r2.agents = [
+    mkAgent('atlas','lead','delegate transcription','crit', 2100, .04, 0),
+    mkAgent('fetcher','sandbox','pull episode audio from feed URL','crit', 1400, .03, 1),
+  ];
+  r2.tokens = 3500; r2.toolCalls = 4;
+  r2.tokSeries = [1.1,1.6,0.8,0,0,0,0,0,0,0,0,0].map(v=>v*1000);
+  const U0 = r2.startedAt;
+  r2.events = [
+    ev(U0+900,'atlas','sys','run accepted — single work item, spawning fetcher'),
+    ev(U0+2400,'fetcher','tool','bash: curl -L feeds.example.com/ep214.mp3'),
+    ev(U0+9800,'fetcher','err','HTTP 403 — feed requires authenticated session'),
+    ev(U0+11000,'fetcher','tool','retry with resolved CDN URL'),
+    ev(U0+19000,'fetcher','err','HTTP 403 again — giving up after 2 attempts'),
+    ev(U0+21000,'atlas','err','run failed: audio unreachable. Suggest: drop the file into the thread and re-dispatch.'),
+  ];
+  r2.artifacts = [];
+  t2.messages = [
+    { who:'you', ts:U0-1500, body:'Transcribe and chapter podcast episode 214 from our feed.' },
+    { who:'atlas', ts:U0+21000, body:'Stopped — the feed returned **403 Forbidden** twice, so the audio never reached the sandbox. Fastest fix: drag the mp3 into this thread and re-dispatch; the podcast-mini skill will take it from there.', err:true },
+  ];
+  t2.runIds = [r2.id];
+
+  S.threads = [t2, t1]; // newest first
+  S.runs[r1.id]=r1; S.runs[r2.id]=r2;
+  S.activeThreadId = t1.id;
+  S.watchRunId = r1.id;
+  S.totalTokens = r1.tokens + r2.tokens;
+  S.models = MOCK_MODELS; S.composerModel = MOCK_MODELS[0].name;
+  S.skills = JSON.parse(JSON.stringify(MOCK_SKILLS));
+  S.memory = MOCK_MEMORY; S.mcp = JSON.parse(JSON.stringify(MOCK_MCP));
+}
+function mkRun(threadId, startedAt){
+  const r = { id: nid('run'), threadId, status:'run', startedAt, endedAt:null,
+    agents: [], events: [], artifacts: [], tokens: 0, toolCalls: 0, tokSeries: [] };
+  return r;
+}
+function mkAgent(name, kind, task, st, tok, ctx, depth){
+  return { id: nid('ag'), name, kind, task, status: st, tokens: tok, ctxUsed: ctx, depth };
+}
+const ev = (ts, agent, kind, msg) => ({ ts, agent, kind, msg });
+const art = (name, type, body, threadId) => ({ id: nid('art'), name, type, body, threadId, bytes: new Blob([body]).size, ts: Date.now() });
+
+/* ---------- live mock run (the show) ---------- */
+function startMockRun(thread, brief){
+  const run = mkRun(thread.id, Date.now());
+  S.runs[run.id] = run; thread.runIds.push(run.id); thread.status = 'run';
+  S.watchRunId = run.id;
+  const rand = mulberry(brief.length * 7 + thread.runIds.length * 13);
+  const lower = brief.toLowerCase();
+  const wantsCode = /\b(build|site|app|scaffold|component|api)\b/.test(lower);
+  const wantsDeck = /\b(deck|slides?|presentation)\b/.test(lower);
+  const shortBrief = brief.length < 60 ? brief : brief.slice(0, 57).replace(/\s+\S*$/,'') + '…';
+
+  const agents = [ mkAgent('atlas','lead','decompose brief, synthesize result','queue',0,0,0) ];
+  agents.push(mkAgent('scout-1','web','primary recon on the brief','queue',0,0,1));
+  agents.push(mkAgent('scout-2','web','counter-pass: gaps, disputes, recency','queue',0,0,1));
+  agents.push(wantsCode
+    ? mkAgent('builder','sandbox','scaffold + run in sandbox','queue',0,0,1)
+    : mkAgent('analyst','sandbox','structure findings, run the numbers','queue',0,0,1));
+  agents.push(wantsDeck
+    ? mkAgent('scribe','report','draft report + deck outline','queue',0,0,1)
+    : mkAgent('scribe','report','draft the write-up','queue',0,0,1));
+  run.agents = agents;
+  const A = Object.fromEntries(agents.map(a=>[a.name,a]));
+
+  const script = [];
+  const say = (t, agent, kind, msg) => script.push({t, fn(){ pushEvent(run, agent, kind, msg); }});
+  const setSt = (t, name, st) => script.push({t, fn(){ A[name].status = st; }});
+
+  say(600,'atlas','sys',`run accepted — brief: "${shortBrief}"`);
+  setSt(600,'atlas','run');
+  say(2100,'atlas','info','decomposed into 3 work items; fanning out 2 scouts');
+  setSt(2600,'scout-1','run'); setSt(2600,'scout-2','run');
+  say(2700,'atlas','tool','spawn(scout-1, scout-2)');
+  const q1 = brief.split(/\s+/).slice(0,5).join(' ').toLowerCase().replace(/[^a-z0-9 ]/g,'');
+  say(3600,'scout-1','tool',`search("${q1}")`);
+  say(4300,'scout-2','tool',`search("${q1} criticism OR dispute OR 2026")`);
+  say(9000,'scout-1','info','12 candidate sources, scoring for authority + recency');
+  say(11500,'scout-2','warn','one source rate-limited — backing off, queue intact');
+  say(15500,'scout-1','info','kept 8 of 12; extracting claims');
+  say(18000,'scout-2','info','counter-pass done: 2 disputes worth flagging');
+  setSt(19000,'scout-1','ok'); setSt(19500,'scout-2','ok');
+  const third = agents[3].name;
+  setSt(20000,third,'run');
+  say(20200,'atlas','tool',`spawn(${third})`);
+  say(21500,third,'tool', wantsCode ? 'bash: pnpm create vite@latest scratch --template vanilla' : 'bash: python structure.py --in claims.json');
+  say(26500,third,'info', wantsCode ? 'scaffold running on sandbox :5173 — smoke test passed' : 'claims normalized; 3 tables built');
+  setSt(28000,third,'ok');
+  setSt(28600,'scribe','run');
+  say(28800,'atlas','tool','spawn(scribe)');
+  say(30000,'scribe','tool','write_file(artifacts/field-notes.md)');
+  say(34000,'scribe','tool', wantsDeck ? 'write_file(artifacts/deck-outline.md)' : 'write_file(artifacts/summary.md)');
+  say(36500,'scribe','info','draft complete; handing back to atlas');
+  setSt(37000,'scribe','ok');
+  say(38000,'atlas','info','synthesis pass over agent reports');
+  say(41500,'atlas','sys','run complete — artifacts in the tray');
+  setSt(41500,'atlas','ok');
+
+  script.push({ t: 30500, fn(){
+    const a1 = art('field-notes.md','md',
+`# Field notes — ${shortBrief}
+
+Drafted by the mock herd to show the full loop: recon fan-out, a sandbox
+pass, and this write-up landing in the artifact tray.
+
+- scout-1 kept 8 of 12 sources after scoring
+- scout-2 flagged 2 disputes on the counter-pass
+- ${third} ${wantsCode ? 'scaffolded and smoke-tested a sandbox build' : 'normalized claims into 3 tables'}
+
+Point the Station at a live gateway and this same console renders the
+real thing — same tray, same telemetry, actual work.
+`, thread.id);
+    run.artifacts.push(a1); renderIfActive('arts'); toast('Artifact','field-notes.md landed in the tray');
+  }});
+  script.push({ t: 34600, fn(){
+    const a2 = art(wantsDeck?'deck-outline.md':'summary.md','md',
+      wantsDeck ? `# Deck outline\n\n1. The one-line answer\n2. What the scouts found (8 kept sources)\n3. The two disputes worth acknowledging\n4. Numbers from the sandbox pass\n5. Recommendation + next watch\n`
+                : `# Summary\n\nOne page, straight answer first, caveats where they belong. The mock run
+keeps it short on purpose — the live gateway writes the real one.\n`, thread.id);
+    run.artifacts.push(a2); renderIfActive('arts');
+  }});
+
+  /* token + series ticker */
+  let tick = 0;
+  const phase = ts => ts<3000?0.15 : ts<19000?1.0 : ts<28000?0.7 : ts<37000?0.85 : ts<41500?0.5 : 0;
+  const tokTimer = setInterval(()=>{
+    if (run.status !== 'run'){ clearInterval(tokTimer); S.timers.delete(tokTimer); return; }
+    tick += 1;
+    const el = Date.now() - run.startedAt;
+    const rate = phase(el) * (900 + rand()*700);
+    run.tokens += rate|0; S.totalTokens += rate|0;
+    const active = run.agents.filter(a=>a.status==='run');
+    for (const a of active){ a.tokens += (rate/Math.max(1,active.length))|0; a.ctxUsed = Math.min(.96, a.ctxUsed + rate/(Math.max(1,active.length)*180000)); }
+    if (tick % 4 === 0){ run.tokSeries.push(run._acc||0); run._acc = 0; if (run.tokSeries.length>24) run.tokSeries.shift(); }
+    run._acc = (run._acc||0) + rate;
+    renderStrip(); renderIfActive('tele');
+  }, 1000);
+  S.timers.add(tokTimer);
+
+  /* play the script */
+  for (const step of script){
+    const t = setTimeout(()=>{ if (run.status!=='run') return; step.fn(); renderIfActive('tele'); S.timers.delete(t); }, step.t);
+    S.timers.add(t);
+  }
+  /* finale */
+  const done = setTimeout(()=>{
+    if (run.status!=='run') return;
+    run.status='ok'; run.endedAt=Date.now(); thread.status='ok';
+    run.toolCalls = 9 + (rand()*4|0);
+    const reply =
+`Done. Two scouts fanned out, ${third} handled the ${wantsCode?'build':'numbers'}, and the write-up is in the tray${wantsDeck?' with a deck outline':''}.
+
+This was the **mock herd** — a scripted run so you can feel the console. Flip the Station to Live and the same brief goes to your DeerFlow gateway for the real thing.`;
+    thread.messages.push({ who:'atlas', ts:Date.now(), body: reply });
+    toast('Run complete', fmtTok(run.tokens)+' tokens · artifacts in the tray');
+    renderAll(); S.timers.delete(done);
+  }, 42500);
+  S.timers.add(done);
+
+  pushEvent(run, 'blind', 'sys', 'telemetry attached to run ' + run.id);
+  return run;
+}
+function stopRun(run){
+  const thread = S.threads.find(t=>t.id===run.threadId);
+  if (run.live && thread) Live.cancel(thread, run);
+  run.status='idle'; run.endedAt=Date.now();
+  if (thread && thread.status==='run') thread.status='idle';
+  run.agents.forEach(a=>{ if (a.status==='run'||a.status==='queue') a.status='idle'; });
+  pushEvent(run,'blind','sys','run stopped from the blind');
+  toast('Stopped','the herd is standing down');
+  renderAll();
+}
+function pushEvent(run, agent, kind, msg){
+  run.events.push(ev(Date.now(), agent, kind, msg));
+  if (kind==='tool') run.toolCalls++;
+}
+
+/* =========================================================================
+   charts — hand-rolled SVG, single hue, thin marks
+   ========================================================================= */
+function sparkSVG(points, w=96, h=26){
+  if (!points || points.length < 2) return `<svg width="${w}" height="${h}" aria-hidden="true"></svg>`;
+  const max = Math.max(...points, 1), min = Math.min(...points, 0);
+  const px = i => 2 + i * (w-8) / (points.length-1);
+  const py = v => h-3 - (v-min) * (h-8) / Math.max(1, max-min);
+  const path = points.map((v,i)=>`${i?'L':'M'}${px(i).toFixed(1)},${py(v).toFixed(1)}`).join('');
+  const lx = px(points.length-1), ly = py(points[points.length-1]);
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true">
+    <path d="${path}" fill="none" stroke="var(--series-dim)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="${lx}" cy="${ly}" r="4.5" fill="var(--surface-1)"/>
+    <circle cx="${lx}" cy="${ly}" r="3" fill="var(--accent)"/>
+  </svg>`;
+}
+function tokChartSVG(series, w, h){
+  const P = { t:14, r:10, b:22, l:40 };
+  const iw = w-P.l-P.r, ih = h-P.t-P.b;
+  const pts = series.length ? series : [0,0];
+  const max = Math.max(...pts, 1000);
+  const step = niceStep(max);
+  const top = Math.ceil(max/step)*step;
+  const px = i => P.l + i * iw / Math.max(1, pts.length-1);
+  const py = v => P.t + ih - v * ih / top;
+  let grid = '', ticks = '';
+  for (let v=0; v<=top; v+=step){
+    grid  += `<line x1="${P.l}" y1="${py(v)}" x2="${w-P.r}" y2="${py(v)}" stroke="var(--grid)" stroke-width="1"/>`;
+    ticks += `<text x="${P.l-8}" y="${py(v)+3.5}" text-anchor="end" font-size="10" fill="var(--ink-3)" font-family="var(--f-mono)" style="font-variant-numeric:tabular-nums">${fmtTok(v)}</text>`;
+  }
+  const line = pts.map((v,i)=>`${i?'L':'M'}${px(i).toFixed(1)},${py(v).toFixed(1)}`).join('');
+  const area = `${line} L${px(pts.length-1)},${py(0)} L${px(0)},${py(0)} Z`;
+  const lx=px(pts.length-1), ly=py(pts[pts.length-1]);
+  return { svg: `<svg width="100%" viewBox="0 0 ${w} ${h}" style="display:block" role="img" aria-label="Token burn per interval">
+    ${grid}${ticks}
+    <path d="${area}" fill="var(--series)" opacity="0.1"/>
+    <path d="${line}" fill="none" stroke="var(--series)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="${lx}" cy="${ly}" r="5.5" fill="var(--surface-1)"/><circle cx="${lx}" cy="${ly}" r="3.5" fill="var(--series)"/>
+    <line id="tc-cross" x1="0" y1="${P.t}" x2="0" y2="${P.t+ih}" stroke="var(--border-strong)" stroke-width="1" style="display:none"/>
+    <circle id="tc-dot" r="4.5" fill="var(--surface-1)" style="display:none"/>
+    <circle id="tc-dot2" r="3" fill="var(--series)" style="display:none"/>
+    <rect id="tc-hit" x="${P.l}" y="${P.t}" width="${iw}" height="${ih}" fill="transparent"/>
+  </svg>`, px, py, pts, P, iw };
+}
+function niceStep(max){
+  const raw = max/3, pow = Math.pow(10, Math.floor(Math.log10(raw)));
+  for (const m of [1,2,5,10]) if (m*pow >= raw) return m*pow;
+  return 10*pow;
+}
+function wireTokChart(wrap, chart){
+  const svg = wrap.querySelector('svg'); if (!svg) return;
+  const tip = wrap.querySelector('.chart-tip');
+  const hit = svg.querySelector('#tc-hit'), cross = svg.querySelector('#tc-cross');
+  const d1 = svg.querySelector('#tc-dot'), d2 = svg.querySelector('#tc-dot2');
+  const show = e => {
+    const r = svg.getBoundingClientRect();
+    const sx = (e.clientX - r.left) * (svg.viewBox.baseVal.width / r.width);
+    const i = Math.max(0, Math.min(chart.pts.length-1, Math.round((sx - chart.P.l) / (chart.iw / Math.max(1,chart.pts.length-1)))));
+    const x = chart.px(i), y = chart.py(chart.pts[i]);
+    cross.style.display=''; cross.setAttribute('x1',x); cross.setAttribute('x2',x);
+    d1.style.display=''; d2.style.display='';
+    d1.setAttribute('cx',x); d1.setAttribute('cy',y); d2.setAttribute('cx',x); d2.setAttribute('cy',y);
+    tip.style.display='block';
+    tip.innerHTML = `<span class="ct-t">interval ${i+1} of ${chart.pts.length}</span><span class="ct-v"><i></i>${fmtNum(chart.pts[i]|0)} tok</span>`;
+    const wr = wrap.getBoundingClientRect();
+    let tx = e.clientX - wr.left + 14; if (tx + tip.offsetWidth > wr.width - 8) tx = e.clientX - wr.left - tip.offsetWidth - 14;
+    tip.style.left = tx+'px'; tip.style.top = Math.max(4, e.clientY - wr.top - 40)+'px';
+  };
+  const hide = () => { tip.style.display='none'; cross.style.display='none'; d1.style.display='none'; d2.style.display='none'; };
+  hit.addEventListener('pointermove', show); hit.addEventListener('pointerleave', hide);
+}
+
+/* =========================================================================
+   renderers
+   ========================================================================= */
+function setView(v){
+  S.view = v;
+  $$('.view').forEach(x=>x.classList.remove('active'));
+  $('#view-'+v).classList.add('active');
+  $$('.rail-item').forEach(b=>{ if (b.dataset.nav===v) b.setAttribute('aria-current','page'); else b.removeAttribute('aria-current'); });
+  renderView(v);
+}
+function renderIfActive(v){ if (S.view===v) renderView(v); }
+function renderView(v){
+  if (v==='ops') renderOps();
+  else if (v==='tele') renderTele();
+  else if (v==='arts') renderArts();
+  else if (v==='station') renderStation();
+}
+function renderAll(){ renderNavCounts(); renderTop(); renderStrip(); renderView(S.view); }
+
+function statusChip(st, label){
+  const map = { run:['run','RUNNING'], ok:['ok','OK'], warn:['warn','DEGRADED'], crit:['crit','FAILED'], idle:['idle','IDLE'], queue:['queue','QUEUED'] };
+  const [cls, text] = map[st] || map.idle;
+  return `<span class="status ${cls}"><span class="sdot"></span>${label||text}</span>`;
+}
+function renderNavCounts(){
+  $('#nav-count-ops').textContent = S.threads.length || '';
+  const running = Object.values(S.runs).filter(r=>r.status==='run').length;
+  $('#nav-count-tele').textContent = running ? running+' live' : '';
+  const arts = Object.values(S.runs).flatMap(r=>r.artifacts||[]).length;
+  $('#nav-count-arts').textContent = arts || '';
+}
+function renderTop(){
+  const pill = $('#mode-pill'), lbl = $('#mode-pill-label'), url = $('#top-url');
+  pill.className = 'mode-pill';
+  if (S.mode==='mock'){ pill.classList.add('mock'); lbl.textContent='MOCK'; url.textContent='mock feed — no gateway attached'; }
+  else if (S.liveOk){ pill.classList.add('live'); lbl.textContent='LIVE'; url.textContent=S.gatewayUrl.replace(/^https?:\/\//,''); }
+  else { pill.classList.add('err'); lbl.textContent='LIVE · UNREACHABLE'; url.textContent=S.gatewayUrl.replace(/^https?:\/\//,''); }
+  $('#rail-url').textContent = S.gatewayUrl.replace(/^https?:\/\//,'');
+}
+function renderStrip(){
+  $('#strip-mode').textContent = 'feed: ' + (S.mode==='mock' ? 'mock' : (S.liveOk?'live':'live (unreachable)'));
+  const run = S.runs[S.watchRunId];
+  $('#strip-run').textContent = run && run.status==='run'
+    ? `run ${run.id} · ${run.agents.filter(a=>a.status==='run').length} agents working`
+    : 'no active run';
+  $('#strip-tokens').textContent = 'burn ' + fmtTok(S.totalTokens) + ' tok';
+  const notes = ['quiet in the field','wind from the northwest','glass steady','herd accounted for'];
+  const running = run && run.status==='run';
+  $('#strip-note').textContent = running ? 'eyes on the herd' : notes[Math.floor(Date.now()/30000)%notes.length];
+}
+
+/* ----- operations ----- */
+function renderOps(){
+  const list = $('#thread-list');
+  if (!S.threads.length){
+    list.innerHTML = `<div class="empty" style="padding:var(--s6) var(--s3)">
+      ${antlerSVG(34)}<div class="e-title">No operations yet</div>
+      <div class="e-sub">Brief the agent below — research, a build, a report. Runs and their telemetry gather here.</div></div>`;
+  } else {
+    list.innerHTML = S.threads.map(t=>{
+      const latest = S.runs[t.runIds[t.runIds.length-1]];
+      return `<button class="thread-card ${t.id===S.activeThreadId?'sel':''}" data-th="${t.id}">
+        <span class="tc-title">${esc(t.title)}</span>
+        <span class="tc-meta">${statusChip(t.status)}<span>${fmtAgo(t.createdAt)}</span>${latest?`<span>${fmtTok(latest.tokens)} tok</span>`:''}</span>
+      </button>`;
+    }).join('');
+    $$('.thread-card', list).forEach(b=>b.addEventListener('click',()=>{
+      S.activeThreadId = b.dataset.th;
+      const t = S.threads.find(x=>x.id===S.activeThreadId);
+      if (t && t.runIds.length) S.watchRunId = t.runIds[t.runIds.length-1];
+      renderOps();
+    }));
+  }
+  renderChat();
+  renderComposer();
+}
+function renderChat(){
+  const head = $('#chat-head'), scroll = $('#chat-scroll');
+  const t = S.threads.find(x=>x.id===S.activeThreadId);
+  if (!t){
+    head.innerHTML = `<div class="ch-title" style="color:var(--ink-3)">New operation</div>`;
+    scroll.innerHTML = `<div class="empty">${antlerSVG(44)}
+      <div class="e-title">The blind is set</div>
+      <div class="e-sub">Nothing dispatched in this thread. Type a brief below — the lead agent decomposes it, the herd fans out, and you watch it all from Telemetry.</div></div>`;
+    return;
+  }
+  const run = S.runs[t.runIds[t.runIds.length-1]];
+  head.innerHTML = `<div class="ch-title">${esc(t.title)}</div>
+    ${run ? `<button class="btn sm" id="btn-watch">Watch in Telemetry</button>` : ''}
+    <button class="iconbtn" id="btn-del-thread" title="Delete operation" aria-label="Delete operation">
+      <svg width="13" height="13" viewBox="0 0 15 15" fill="none" aria-hidden="true"><path d="M2.5 4h10M6 4V2.5h3V4M4 4l.7 9h5.6L11 4M6.2 6.5v4M8.8 6.5v4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+    </button>
+    ${statusChip(t.status)}`;
+  const watch = $('#btn-watch'); if (watch) watch.addEventListener('click',()=>{ S.watchRunId = run.id; setView('tele'); });
+  $('#btn-del-thread').addEventListener('click',()=>deleteThread(t));
+  scroll.innerHTML = t.messages.map(m=>{
+    if (m.who==='you') return `<div class="msg user"><div class="m-who">YOU · ${fmtT(m.ts)}</div><div class="m-body">${esc(m.body)}</div></div>`;
+    return `<div class="msg agent"><div class="m-who"><span style="color:${m.err?'var(--crit)':'var(--series)'}">ATLAS</span> · lead · ${fmtT(m.ts)}</div><div class="m-body">${md(m.body)}</div></div>`;
+  }).join('')
+  + (t.status==='run' ? `<div class="msg agent"><div class="m-who"><span style="color:var(--series)">ATLAS</span> · lead · working</div><div class="m-body"><span style="color:var(--ink-3)">run in flight — watch the herd in Telemetry</span> <span class="cursor-blink"></span></div></div>` : '');
+  scroll.scrollTop = scroll.scrollHeight;
+}
+function renderComposer(){
+  const sel = $('#composer-model');
+  sel.innerHTML = S.models.map(m=>`<option value="${esc(m.name)}" ${m.name===S.composerModel?'selected':''}>${esc(m.display_name||m.name)}</option>`).join('')
+    || '<option>no models — check Station</option>';
+  const chips = $('#composer-skills');
+  chips.innerHTML = S.skills.filter(s=>s.enabled).slice(0,3).map(s=>
+    `<button class="skill-chip" data-skill="${s.id}" aria-pressed="${S.composerSkills.has(s.id)}">${esc(s.name)}</button>`).join('');
+  $$('.skill-chip', chips).forEach(c=>c.addEventListener('click',()=>{
+    const id=c.dataset.skill;
+    S.composerSkills.has(id) ? S.composerSkills.delete(id) : S.composerSkills.add(id);
+    c.setAttribute('aria-pressed', S.composerSkills.has(id));
+  }));
+}
+function deleteThread(t){
+  if (S.mode==='live' && S.liveOk && t.remoteId)
+    Live.req('/api/threads/'+t.remoteId, {method:'DELETE'}).catch(e=>toast('Delete', 'gateway: '+e.message, true));
+  t.runIds.forEach(rid=>{ delete S.runs[rid]; });
+  S.threads = S.threads.filter(x=>x.id!==t.id);
+  if (S.activeThreadId===t.id) S.activeThreadId = S.threads[0]?.id || null;
+  if (!S.runs[S.watchRunId]) S.watchRunId = S.threads[0]?.runIds?.slice(-1)[0] || null;
+  toast('Deleted', t.title.slice(0,48));
+  renderAll();
+}
+function renderPending(){
+  const box = $('#pending-files'); if (!box) return;
+  if (!S.pendingFiles?.length){ box.style.display='none'; box.innerHTML=''; return; }
+  box.style.display='flex';
+  box.innerHTML = S.pendingFiles.map((f,i)=>
+    `<span class="tag" style="gap:7px">${esc(f.name)} <span style="color:var(--ink-3)">${fmtBytes(f.size)}</span>
+     <button class="iconbtn" data-unfile="${i}" style="width:16px;height:16px" aria-label="Remove ${esc(f.name)}">×</button></span>`).join('');
+  $$('[data-unfile]', box).forEach(b=>b.addEventListener('click',()=>{ S.pendingFiles.splice(+b.dataset.unfile,1); renderPending(); }));
+}
+function dispatch(){
+  const ta = $('#composer-input');
+  const brief = ta.value.trim();
+  if (!brief) { ta.focus(); return; }
+  const btn = $('#btn-dispatch'); btn.disabled = true; setTimeout(()=>btn.disabled=false, 1200);
+  let t = S.threads.find(x=>x.id===S.activeThreadId);
+  const title = brief.length<64 ? brief : brief.slice(0,61).replace(/\s+\S*$/,'')+'…';
+  if (!t || t.status==='run'){ t = { id:nid('th'), title, createdAt:Date.now(), status:'run', messages:[], runIds:[] };
+    S.threads.unshift(t); S.activeThreadId = t.id; }
+  else if (!t.messages.length) t.title = title;
+  t.messages.push({ who:'you', ts:Date.now(), body:brief });
+  ta.value='';
