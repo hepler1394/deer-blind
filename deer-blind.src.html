@@ -662,7 +662,7 @@ GET&nbsp;&nbsp;/api/memory · POST /api/memory/reload · GET/PUT /api/mcp/config
 
   <!-- ======= bottom instrument strip ======= -->
   <footer class="strip" aria-hidden="true">
-    <span>BLIND v0.5</span><span class="sep">|</span>
+    <span>BLIND v0.6</span><span class="sep">|</span>
     <span id="strip-mode">feed: mock</span><span class="sep">|</span>
     <span id="strip-run">no active run</span>
     <span class="spacer"></span>
@@ -760,6 +760,7 @@ const S = {
   activeThreadId: null,
   watchRunId: null,             // what Telemetry is pointed at
   feedFilter: 'all',
+  feedQuery: '',
   selArtifact: null,
   totalTokens: 0,
   models: [], skills: [], memory: null, mcp: null,
@@ -1109,6 +1110,40 @@ function stopRun(run){
   toast('Stopped','the herd is standing down');
   renderAll();
 }
+function fieldReport(run){
+  /* export a run's telemetry as a markdown field report */
+  const t = S.threads.find(x=>x.id===run.threadId);
+  const dur = (run.endedAt||Date.now()) - run.startedAt;
+  const lines = [];
+  lines.push('# Field report — '+(t?t.title:'(untitled run)'));
+  lines.push('');
+  lines.push('run `'+(run.remoteRunId||run.id)+'` · status **'+run.status.toUpperCase()+'** · '+fmtDur(dur)+' · '+fmtNum(run.tokens|0)+' tokens · '+run.toolCalls+' tool calls · '+(run.artifacts||[]).length+' artifacts');
+  lines.push('');
+  lines.push('## The herd');
+  lines.push('');
+  lines.push('| agent | kind | status | tokens | task |');
+  lines.push('| --- | --- | --- | --- | --- |');
+  for (const a of run.agents) lines.push('| '+a.name+' | '+a.kind+' | '+a.status+' | '+fmtNum(a.tokens|0)+' | '+String(a.task).replace(/\|/g,'/')+' |');
+  lines.push('');
+  lines.push('## Field feed');
+  lines.push('');
+  lines.push('```');
+  for (const e of run.events) lines.push(fmtT(e.ts)+'  '+String(e.agent).padEnd(10)+' ['+e.kind+'] '+e.msg);
+  lines.push('```');
+  if ((run.artifacts||[]).length){
+    lines.push('');
+    lines.push('## Artifacts');
+    lines.push('');
+    for (const a of run.artifacts) lines.push('- `'+a.name+'` ('+fmtBytes(a.bytes)+')');
+  }
+  lines.push('');
+  lines.push('_exported from Deer Blind v0.6_');
+  const blob = new Blob([lines.join('\n')], {type:'text/markdown'});
+  const u = URL.createObjectURL(blob); const link = document.createElement('a');
+  link.href = u; link.download = 'field-report-'+String(run.remoteRunId||run.id).slice(0,8)+'.md';
+  link.click(); setTimeout(()=>URL.revokeObjectURL(u), 5000);
+  toast('Field report','telemetry exported as markdown');
+}
 function pushEvent(run, agent, kind, msg){
   run.events.push(ev(Date.now(), agent, kind, msg));
   if (kind==='tool') run.toolCalls++;
@@ -1365,6 +1400,12 @@ function dispatch(){
 function renderTele(){
   const main = $('#tele-main'), side = $('#tele-side');
   const run = S.runs[S.watchRunId];
+  /* don't clobber the grep box while the user is typing in it */
+  if (document.activeElement && document.activeElement.id==='feed-q'){
+    const fsEl = $('#feed-scroll');
+    if (fsEl && run) fsEl.innerHTML = renderFeedLines(run);
+    return;
+  }
   if (!run){
     main.innerHTML = `<div class="empty" style="height:100%">${antlerSVG(44)}
       <div class="e-title">Telemetry idle</div>
@@ -1385,6 +1426,7 @@ function renderTele(){
           <span id="rh-elapsed">${fmtDur(dur)} ${run.status==='run'?'elapsed':'total'}</span><span>·</span>
           <span>${run.agents.length} agents</span>
           ${run.status==='run' ? `<span>·</span><button class="btn sm danger" id="btn-stop-run">Stop run</button>` : ''}
+          <span>·</span><button class="btn sm" id="btn-field-report">Field report</button>
           ${others.length?`<span>·</span><select class="input" id="tele-pick" style="width:auto;padding:2px 24px 2px 8px;font-size:11px;font-family:var(--f-mono);background-color:transparent">
             <option value="">other runs…</option>
             ${others.map(o=>`<option value="${o.runIds[o.runIds.length-1]}">${esc(o.title.slice(0,42))}</option>`).join('')}
@@ -1410,6 +1452,8 @@ function renderTele(){
       <div class="panel-h"><h3>Field feed</h3>
         <div class="feed-filters" style="margin-left:auto">
           ${['all','tool','info','warn','err'].map(k=>`<button class="f-chip" data-f="${k}" aria-pressed="${S.feedFilter===k}">${k}</button>`).join('')}
+          <input class="input" id="feed-q" placeholder="grep the wire…" value="${esc(S.feedQuery)}" aria-label="Filter feed text"
+            style="width:130px;padding:3px 8px;font:400 11px var(--f-mono)">
         </div>
       </div>
       <div class="feed-scroll" id="feed-scroll">${renderFeedLines(run)}</div>
@@ -1422,6 +1466,8 @@ function renderTele(){
     r.addEventListener('keydown', e=>{ if (e.key==='Enter'||e.key===' '){ e.preventDefault(); go(); }});
   });
   $$('.f-chip', main).forEach(c=>c.addEventListener('click',()=>{ S.feedFilter=c.dataset.f; renderTele(); }));
+  const fq = $('#feed-q'); if (fq) fq.addEventListener('input', ()=>{ S.feedQuery = fq.value; const fsEl=$('#feed-scroll'); if (fsEl) fsEl.innerHTML = renderFeedLines(run); });
+  const rep = $('#btn-field-report'); if (rep) rep.addEventListener('click', ()=>fieldReport(run));
   const fs = $('#feed-scroll'); fs.scrollTop = fs.scrollHeight;
 
   /* side instruments */
@@ -1457,7 +1503,9 @@ function renderTele(){
   wireTokChart(cw, chart);
 }
 function renderFeedLines(run){
+  const q = S.feedQuery.trim().toLowerCase();
   const evs = run.events.filter(e=>{
+    if (q && !((e.agent+' '+e.msg).toLowerCase().includes(q))) return false;
     if (S.feedFilter==='all') return true;
     if (['tool','info','warn','err'].includes(S.feedFilter)) return e.kind===S.feedFilter || (S.feedFilter==='info'&&e.kind==='sys');
     return e.agent===S.feedFilter;
@@ -1814,7 +1862,7 @@ const Live = {
         run.agents = [mkAgent('gateway','lead','gateway run '+String(rid).slice(0,8), run.status, 0, 0, 0)];
         S.runs[run.id] = run; t.runIds.push(run.id);
         if (run.status==='run') this.attach(t, run);
-        else this.loadRunEvents(t, run);
+        else { this.loadRunEvents(t, run); this.pullArtifacts(t, run); }
       }
       try { const tu = await this.req(`/api/threads/${t.remoteId}/token-usage`);
         const last = S.runs[t.runIds[t.runIds.length-1]];
@@ -1846,6 +1894,27 @@ const Live = {
       run.toolCalls = run.events.filter(x=>x.kind==='tool').length;
       renderIfActive('tele');
     } catch(e){ note('run-events', e); }
+  },
+  async pullArtifacts(t, run){
+    /* fetch a run's workspace files into the artifact tray */
+    if (!run.remoteRunId || run._artsPulled) return; run._artsPulled = true;
+    try {
+      const wc = await this.req(`/api/threads/${t.remoteId}/runs/${run.remoteRunId}/workspace-changes?include_diff=false`);
+      const files = wc.files||wc.changes||[];
+      for (const f of files.slice(0,30)){
+        const p = f.path||f.file||String(f);
+        pushEvent(run,'gateway','info','workspace: '+p);
+        const name = p.split('/').pop();
+        const ext = (name.split('.').pop()||'').toLowerCase();
+        const type = ext==='md'?'md':ext==='html'?'html':'json';
+        let body = `(file lives on the gateway)\n\nGET ${this.base()}/api/threads/${t.remoteId}/artifacts/${p}`;
+        try { if (['md','txt','json','html','csv'].includes(ext)){
+          const raw = await this.req(`/api/threads/${t.remoteId}/artifacts/${encodeURI(p)}`);
+          body = typeof raw==='string' ? raw : JSON.stringify(raw,null,2); } } catch(_){}
+        run.artifacts.push({...art(name, type, body, t.id), gwPath: p});
+      }
+      if (files.length){ toast('Artifacts', files.length+' file'+(files.length===1?'':'s')+' pulled from the gateway'); renderNavCounts(); renderIfActive('arts'); }
+    } catch(e){ note('workspace-changes', e); }
   },
   async attach(t, run){
     /* resume watching an in-flight gateway run (survives tab reloads) */
@@ -1944,23 +2013,7 @@ const Live = {
         if (tu.total_tokens){ S.totalTokens += tu.total_tokens - run.tokens; run.tokens = tu.total_tokens;
           pushEvent(run,'gateway','info',`token usage (gateway): ${fmtNum(tu.total_tokens)} total · ${fmtNum(tu.total_input_tokens)} in / ${fmtNum(tu.total_output_tokens)} out · ${tu.total_runs} runs`); }
       } catch(e){ note('token-usage', e); }
-      try { if (run.remoteRunId){
-        const wc = await this.req(`/api/threads/${thread.remoteId}/runs/${run.remoteRunId}/workspace-changes?include_diff=false`);
-        const files = wc.files||wc.changes||[];
-        for (const f of files.slice(0,30)){
-          const p = f.path||f.file||String(f);
-          pushEvent(run,'gateway','info','workspace: '+p);
-          const name = p.split('/').pop();
-          const ext = (name.split('.').pop()||'').toLowerCase();
-          const type = ext==='md'?'md':ext==='html'?'html':'json';
-          let body = `(file lives on the gateway)\n\nGET ${this.base()}/api/threads/${thread.remoteId}/artifacts/${p}`;
-          try { if (['md','txt','json','html','csv'].includes(ext)){
-            const raw = await this.req(`/api/threads/${thread.remoteId}/artifacts/${encodeURI(p)}`);
-            body = typeof raw==='string' ? raw : JSON.stringify(raw,null,2); } } catch(_){}
-          run.artifacts.push({...art(name, type, body, thread.id), gwPath: p});
-        }
-        if (files.length) toast('Artifacts', files.length+' file'+(files.length===1?'':'s')+' pulled from the gateway');
-      }} catch(e){ note('workspace-changes', e); }
+      await this.pullArtifacts(thread, run);
       const fin = stripThink(acc);
       thread.messages.push({who:'atlas', ts:Date.now(), think: fin.think || undefined, body: fin.text || 'Run finished — the stream carried no assistant text this console recognized. The raw event log is on the gateway: GET /api/threads/'+thread.remoteId+'/runs/'+(run.remoteRunId||'…')+'/events.'});
     } catch(e){
@@ -2109,15 +2162,22 @@ function boot(){
   }, 1000);
   $('#top-clock').textContent = fmtClock(new Date());
 
-  /* gateway watchdog — notice when the wire goes quiet */
+  /* gateway watchdog — notices outages and heals when the wire returns */
   setInterval(async ()=>{
-    if (S.mode!=='live' || !S.liveOk) return;
+    if (S.mode!=='live') return;
+    let up = false;
     try {
       const r = await fetch(Live.base()+'/api/models', {credentials:'include', headers:Live.headers(false)});
-      if (!r.ok) throw new Error(r.status);
-    } catch(_){
+      up = r.ok;
+    } catch(_){ up = false; }
+    if (S.liveOk && !up){
       S.liveOk = false; renderTop(); renderStrip();
-      toast('Gateway lost','the wire went quiet — check Station → Connection', true);
+      toast('Gateway lost','the wire went quiet — watching for its return', true);
+    } else if (!S.liveOk && up){
+      S.liveOk = true;
+      S.threads.forEach(t=>{ if (t.live) t._runsLoaded = false; });
+      toast('Gateway back','wire restored — re-hydrating');
+      Live.hydrate();
     }
   }, 30000);
 
