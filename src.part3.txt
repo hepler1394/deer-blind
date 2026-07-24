@@ -469,6 +469,10 @@ const Live = {
           } else if (evName==='values' && d && typeof d==='object'){
             const n = (d.messages||[]).length;
             if (n && n!==run._lastN){ run._lastN=n; pushEvent(run,'gateway','info','state: '+n+' messages in thread'); }
+          } else if (evName==='metadata' && d && d.run_id){
+            /* CORS hides the Content-Location header cross-origin; the metadata
+               event carries run_id in the body, which is always readable */
+            if (!run.remoteRunId){ run.remoteRunId = d.run_id; pushEvent(run,'blind','sys','run '+d.run_id+' streaming (SSE)'); }
           } else if (evName==='error'){
             pushEvent(run,'gateway','err', (typeof d==='string'?d:JSON.stringify(d)).slice(0,220));
           }
@@ -649,7 +653,5 @@ function boot(){
 }
 boot();
 </script>
-</body>
-</html>
 </body>
 </html>
