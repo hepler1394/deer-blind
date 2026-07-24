@@ -662,7 +662,7 @@ GET&nbsp;&nbsp;/api/memory · POST /api/memory/reload · GET/PUT /api/mcp/config
 
   <!-- ======= bottom instrument strip ======= -->
   <footer class="strip" aria-hidden="true">
-    <span>BLIND v0.4</span><span class="sep">|</span>
+    <span>BLIND v0.5</span><span class="sep">|</span>
     <span id="strip-mode">feed: mock</span><span class="sep">|</span>
     <span id="strip-run">no active run</span>
     <span class="spacer"></span>
@@ -1704,13 +1704,15 @@ const Live = {
         S.threads.push({ id: nid('th'), remoteId: rt.thread_id, live:true,
           title: meta.display_name || meta.title || ('gateway thread '+String(rt.thread_id).slice(0,8)),
           createdAt: rt.created_at ? +new Date(rt.created_at) : Date.now(),
-          status: rt.status==='busy' ? 'run' : rt.status==='error' ? 'crit' : 'ok',
+          status: /busy|running|interrupt/i.test(String(rt.status||'')) ? 'run' : /error|fail/i.test(String(rt.status||'')) ? 'crit' : 'ok',
           messages: [], runIds: [] });
       }
+      for (const t of S.threads){ if (t.live && t.status==='run') this.loadRuns(t); }
     } catch(e){ note('threads-search', e); }
   },
   async loadThread(t){
     /* lazy-load a gateway thread's message history on first open */
+    this.loadRuns(t);
     try {
       const msgs = await this.req(`/api/threads/${t.remoteId}/messages?limit=60`);
       const out = [];
@@ -1730,6 +1732,141 @@ const Live = {
       if (out.length){ t.messages = out; renderChat(); }
       else pushToastOnce('History','no displayable messages on that gateway thread');
     } catch(e){ note('thread-messages', e); toast('History','could not load thread history — '+e.message, true); }
+  },
+  async consumeSSE(res, run){
+    /* shared SSE reader — used by fresh dispatches and mid-flight re-attach */
+    const lead = run.agents[0];
+    const nodes = run._nodes = run._nodes || {};
+    const touchNode = (name)=>{
+      if (!name || name==='__start__' || name==='__end__') return null;
+      if (!nodes[name]){
+        nodes[name] = mkAgent(name,'node','graph node','run',0,0,1);
+        run.agents.push(nodes[name]);
+      }
+      return nodes[name];
+    };
+    const reader = res.body.getReader(); const dec = new TextDecoder();
+    let buf='', evName='', acc='';
+    const bump = n => { run.tokens += n; S.totalTokens += n; run._acc=(run._acc||0)+n;
+      if (!run._t0 || Date.now()-run._t0 > 4000){ run.tokSeries.push(run._acc); run._acc=0; run._t0=Date.now();
+        if (run.tokSeries.length>24) run.tokSeries.shift(); } };
+    while (true){
+      const {done, value} = await reader.read(); if (done) break;
+      buf += dec.decode(value, {stream:true});
+      const frames = buf.split('\n\n'); buf = frames.pop();
+      for (const frame of frames){
+        evName = '';
+        let data = '';
+        for (const line of frame.split('\n')){
+          if (line.startsWith('event:')) evName = line.slice(6).trim();
+          else if (line.startsWith('data:')) data += line.slice(5).trim();
+          /* lines starting with ':' are heartbeats — ignored */
+        }
+        if (!evName || !data) continue;
+        if (evName==='end'){ buf=''; break; }
+        let d; try { d = JSON.parse(data); } catch(_){ continue; }
+        if (evName==='messages'){
+          const [chunk, meta] = Array.isArray(d) ? d : [d, {}];
+          const nodeName = meta?.langgraph_node || meta?.checkpoint_ns?.split(':')[0] || null;
+          const agentRow = touchNode(nodeName) || lead;
+          const t = chunk?.type || chunk?.role || '';
+          if (/human|user|system/i.test(t)) continue; /* input echo — not agent output */
+          let text = '';
+          const c = chunk?.content;
+          if (typeof c==='string') text = c;
+          else if (Array.isArray(c)) text = c.map(p=>p?.text||'').join('');
+          if (/tool/i.test(t)){
+            pushEvent(run, agentRow.name, 'tool', (chunk.name?chunk.name+': ':'')+String(text).slice(0,160));
+          } else if (chunk?.tool_calls?.length || chunk?.tool_call_chunks?.length){
+            const tc = (chunk.tool_calls||chunk.tool_call_chunks||[])[0]||{};
+            if (tc.name) pushEvent(run, agentRow.name, 'tool', 'call '+tc.name+'(…)');
+          }
+          if (text){
+            acc += text; bump(Math.ceil(text.length/4));
+            agentRow.tokens += Math.ceil(text.length/4);
+          }
+        } else if (evName==='values' && d && typeof d==='object'){
+          const n = (d.messages||[]).length;
+          if (n && n!==run._lastN){ run._lastN=n; pushEvent(run,'gateway','info','state: '+n+' messages in thread'); }
+        } else if (evName==='metadata' && d && d.run_id){
+          if (!run.remoteRunId){ run.remoteRunId = d.run_id; pushEvent(run,'blind','sys','run '+d.run_id+' streaming (SSE)'); }
+        } else if (evName==='error'){
+          pushEvent(run,'gateway','err', (typeof d==='string'?d:JSON.stringify(d)).slice(0,220));
+        }
+      }
+      renderIfActive('tele'); renderStrip();
+    }
+    return acc;
+  },
+  async loadRuns(t){
+    /* backfill a gateway thread's runs into Telemetry; re-attach if one is live */
+    if (t._runsLoaded) return; t._runsLoaded = true;
+    try {
+      const runs = await this.req(`/api/threads/${t.remoteId}/runs`);
+      for (const rr of (Array.isArray(runs)?runs:[]).slice(-6)){
+        const rid = rr.run_id || rr.id; if (!rid) continue;
+        if (t.runIds.some(x=>S.runs[x] && S.runs[x].remoteRunId===rid)) continue;
+        const run = mkRun(t.id, rr.created_at ? +new Date(rr.created_at) : Date.now());
+        run.live = true; run.remoteRunId = rid; run.thread = t;
+        const st = String(rr.status||'');
+        run.status = /run|pend|stream/i.test(st) ? 'run' : /err|fail|cancel/i.test(st) ? 'crit' : 'ok';
+        run.endedAt = run.status==='run' ? null : (rr.updated_at ? +new Date(rr.updated_at) : run.startedAt);
+        run.agents = [mkAgent('gateway','lead','gateway run '+String(rid).slice(0,8), run.status, 0, 0, 0)];
+        S.runs[run.id] = run; t.runIds.push(run.id);
+        if (run.status==='run') this.attach(t, run);
+        else this.loadRunEvents(t, run);
+      }
+      try { const tu = await this.req(`/api/threads/${t.remoteId}/token-usage`);
+        const last = S.runs[t.runIds[t.runIds.length-1]];
+        if (last && tu.total_tokens) last.tokens = tu.total_tokens;
+      } catch(_){}
+      /* reconcile stale thread status once runs are known */
+      if (t.status==='run' && !t.runIds.some(x=>S.runs[x] && S.runs[x].status==='run')){
+        const lastR = S.runs[t.runIds[t.runIds.length-1]];
+        if (lastR) t.status = lastR.status;
+      }
+    } catch(e){ note('runs-list', e); }
+    renderNavCounts(); renderIfActive('tele');
+  },
+  async loadRunEvents(t, run){
+    /* pull the persisted event stream for a completed run into the field feed */
+    try {
+      const evs = await this.req(`/api/threads/${t.remoteId}/runs/${run.remoteRunId}/events?limit=300`);
+      for (const e of (Array.isArray(evs)?evs:[])){
+        const et = String(e.event_type||'');
+        const kind = /error|fail/i.test(et) ? 'err' : /tool/i.test(et) ? 'tool' : /ai\.response/i.test(et) ? 'info' : 'sys';
+        let msg = et;
+        const c = e.content;
+        if (typeof c==='string' && c && !/^<object/.test(c)) msg = et+': '+stripThink(c).text.slice(0,140);
+        else if (c && typeof c==='object' && typeof c.content==='string') msg = et+': '+stripThink(c.content).text.slice(0,140);
+        else if (e.name) msg = et+': '+e.name;
+        run.events.push({ ts: e.created_at ? +new Date(e.created_at) : run.startedAt,
+          agent: e.task_id ? String(e.task_id).slice(0,8) : 'gateway', kind, msg });
+      }
+      run.toolCalls = run.events.filter(x=>x.kind==='tool').length;
+      renderIfActive('tele');
+    } catch(e){ note('run-events', e); }
+  },
+  async attach(t, run){
+    /* resume watching an in-flight gateway run (survives tab reloads) */
+    pushEvent(run,'blind','sys','re-attaching to in-flight run '+String(run.remoteRunId).slice(0,8));
+    S.watchRunId = run.id; renderIfActive('tele');
+    try {
+      const res = await fetch(this.base()+`/api/threads/${t.remoteId}/runs/${run.remoteRunId}/stream`,
+        { method:'GET', credentials:'include', headers:this.headers(false) });
+      if (!res.ok || !res.body) throw new Error(res.status+' '+res.statusText+' on run stream');
+      const acc = await this.consumeSSE(res, run);
+      run.status='ok'; run.endedAt=Date.now();
+      if (t.status==='run') t.status='ok';
+      run.agents.forEach(a=>{ if (a.status==='run') a.status='ok'; });
+      const fin = stripThink(acc);
+      if (fin.text) t.messages.push({who:'atlas', ts:Date.now(), body:fin.text, think:fin.think||undefined});
+      pushEvent(run,'blind','sys','stream closed');
+    } catch(e){
+      run.status='warn';
+      pushEvent(run,'gateway','err','re-attach failed: '+e.message);
+    }
+    renderAll();
   },
   async putSkill(s){
     try { await this.req('/api/skills/'+encodeURIComponent(s.id), {method:'PUT', body: JSON.stringify({enabled:s.enabled})}); }
@@ -1777,7 +1914,6 @@ const Live = {
     const lead = mkAgent('gateway','lead','remote run on '+this.base().replace(/^https?:\/\//,''),'run',0,0,0);
     run.agents=[lead];
     run.live = true; run.thread = thread;
-    const nodes = {};  // langgraph node name -> agent row
     pushEvent(run,'blind','sys','opening thread on gateway');
     renderAll();
     try {
@@ -1799,67 +1935,7 @@ const Live = {
       const loc = res.headers.get('Content-Location')||'';
       run.remoteRunId = (loc.match(/\/runs\/([^/]+)$/)||[])[1] || null;
       if (run.remoteRunId) pushEvent(run,'blind','sys','run '+run.remoteRunId+' streaming (SSE)');
-      const touchNode = (name)=>{
-        if (!name || name==='__start__' || name==='__end__') return null;
-        if (!nodes[name]){
-          nodes[name] = mkAgent(name,'node','graph node','run',0,0,1);
-          run.agents.push(nodes[name]);
-        }
-        return nodes[name];
-      };
-      const reader = res.body.getReader(); const dec = new TextDecoder();
-      let buf='', evName='', acc='';
-      const bump = n => { run.tokens += n; S.totalTokens += n; run._acc=(run._acc||0)+n;
-        if (!run._t0 || Date.now()-run._t0 > 4000){ run.tokSeries.push(run._acc); run._acc=0; run._t0=Date.now();
-          if (run.tokSeries.length>24) run.tokSeries.shift(); } };
-      while (true){
-        const {done, value} = await reader.read(); if (done) break;
-        buf += dec.decode(value, {stream:true});
-        const frames = buf.split('\n\n'); buf = frames.pop();
-        for (const frame of frames){
-          evName = '';
-          let data = '';
-          for (const line of frame.split('\n')){
-            if (line.startsWith('event:')) evName = line.slice(6).trim();
-            else if (line.startsWith('data:')) data += line.slice(5).trim();
-            /* lines starting with ':' are heartbeats — ignored */
-          }
-          if (!evName || !data) continue;
-          if (evName==='end'){ buf=''; break; }
-          let d; try { d = JSON.parse(data); } catch(_){ continue; }
-          if (evName==='messages'){
-            const [chunk, meta] = Array.isArray(d) ? d : [d, {}];
-            const nodeName = meta?.langgraph_node || meta?.checkpoint_ns?.split(':')[0] || null;
-            const agentRow = touchNode(nodeName) || lead;
-            const t = chunk?.type || chunk?.role || '';
-            if (/human|user|system/i.test(t)) continue; /* input echo — not agent output */
-            let text = '';
-            const c = chunk?.content;
-            if (typeof c==='string') text = c;
-            else if (Array.isArray(c)) text = c.map(p=>p?.text||'').join('');
-            if (/tool/i.test(t)){
-              pushEvent(run, agentRow.name, 'tool', (chunk.name?chunk.name+': ':'')+String(text).slice(0,160));
-            } else if (chunk?.tool_calls?.length || chunk?.tool_call_chunks?.length){
-              const tc = (chunk.tool_calls||chunk.tool_call_chunks||[])[0]||{};
-              if (tc.name) pushEvent(run, agentRow.name, 'tool', 'call '+tc.name+'(…)');
-            }
-            if (text){
-              acc += text; bump(Math.ceil(text.length/4));
-              agentRow.tokens += Math.ceil(text.length/4);
-            }
-          } else if (evName==='values' && d && typeof d==='object'){
-            const n = (d.messages||[]).length;
-            if (n && n!==run._lastN){ run._lastN=n; pushEvent(run,'gateway','info','state: '+n+' messages in thread'); }
-          } else if (evName==='metadata' && d && d.run_id){
-            /* CORS hides the Content-Location header cross-origin; the metadata
-               event carries run_id in the body, which is always readable */
-            if (!run.remoteRunId){ run.remoteRunId = d.run_id; pushEvent(run,'blind','sys','run '+d.run_id+' streaming (SSE)'); }
-          } else if (evName==='error'){
-            pushEvent(run,'gateway','err', (typeof d==='string'?d:JSON.stringify(d)).slice(0,220));
-          }
-        }
-        renderIfActive('tele'); renderStrip();
-      }
+      const acc = await this.consumeSSE(res, run);
       run.status='ok'; run.endedAt=Date.now(); thread.status='ok';
       run.agents.forEach(a=>{ if (a.status==='run') a.status='ok'; });
       pushEvent(run,'blind','sys','stream closed');

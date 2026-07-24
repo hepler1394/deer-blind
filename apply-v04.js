@@ -1,1 +1,0 @@
-const fs=require("fs");const H=JSON.parse(fs.readFileSync("patch-v04.json","utf8"));let s=fs.readFileSync("deer-blind.src.html","utf8");let ok=0,miss=[];H.forEach((h,i)=>{if(s.includes(h.o)){s=s.split(h.o).join(h.n);ok++}else miss.push(i)});fs.writeFileSync("deer-blind.src.html",s);console.log("applied",ok,"missing",JSON.stringify(miss));

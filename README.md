@@ -19,7 +19,6 @@ a live gateway boot — native `/api/threads` SSE, run cancel, token usage, work
 
 ```powershell
 npm install @fontsource/chakra-petch @fontsource/ibm-plex-sans @fontsource/ibm-plex-mono
-node -e "const fs=require('fs');fs.writeFileSync('deer-blind.src.html',['src.part1.txt','src.part2.txt','src.part3.txt'].map(p=>fs.readFileSync(p,'utf8')).join(''))"
 node build-blind.mjs
 ```
 
