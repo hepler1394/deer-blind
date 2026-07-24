@@ -224,6 +224,7 @@ select.input{appearance:none;padding-right:26px;
   border-bottom:1px solid var(--border-hair);min-height:52px}
 .chat-head .ch-title{font:600 14.5px/1.3 var(--f-body);letter-spacing:-.01em;flex:1;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.narrow-new{display:none}
 .chat-scroll{flex:1;overflow-y:auto;padding:var(--s5);display:flex;flex-direction:column;gap:var(--s4)}
 .msg{max-width:720px;display:flex;flex-direction:column;gap:6px}
 .msg .m-who{display:flex;align-items:center;gap:8px;font:600 10.5px/1 var(--f-mono);
@@ -441,12 +442,14 @@ select.input{appearance:none;padding-right:26px;
 }
 @media (max-width:820px){
   :root{--rail-w:56px}
-  .rail-item{justify-content:center;padding:9px 0}
-  .rail-item .count,.rail-item svg+*{display:none}
-  .rail-item svg{margin:0}
+  .rail-item{justify-content:center;padding:9px 0;gap:0;font-size:0}
+  .rail-item .count{display:none}
+  .rail-item svg{margin:0;width:16px;height:16px}
   .rail-eyebrow,.rail-foot{display:none}
   .ops{grid-template-columns:1fr}
   .ops-list{display:none}
+  .composer-hint{display:none}
+  .narrow-new{display:inline-flex !important}
   .tele-side{grid-template-columns:1fr}
 }
 </style>
@@ -659,7 +662,7 @@ GET&nbsp;&nbsp;/api/memory · POST /api/memory/reload · GET/PUT /api/mcp/config
 
   <!-- ======= bottom instrument strip ======= -->
   <footer class="strip" aria-hidden="true">
-    <span>BLIND v0.1</span><span class="sep">|</span>
+    <span>BLIND v0.4</span><span class="sep">|</span>
     <span id="strip-mode">feed: mock</span><span class="sep">|</span>
     <span id="strip-run">no active run</span>
     <span class="spacer"></span>
@@ -734,6 +737,16 @@ function md(src){
     if (para.length) out.push(`<p>${inline(para.join(' '))}</p>`); else i++;
   }
   return out.join('\n').replace(/\x00B(\d+)\x00/g, (_,n)=>blocks[+n]);
+}
+
+/* qwen-style reasoning: pull <think>…</think> out of a message */
+function stripThink(s){
+  let think = '';
+  const text = String(s)
+    .replace(/<think>([\s\S]*?)<\/think>/gi, (_,t)=>{ think += t.trim()+'\n'; return ''; })
+    .replace(/^<think>[\s\S]*$/gi, m=>{ think += m.replace(/^<think>/i,'').trim(); return ''; })
+    .trim();
+  return { text, think: think.trim() };
 }
 
 /* ---------- state ---------- */
@@ -945,6 +958,7 @@ Four artifacts in the tray: the field scan, a spend chart, the source trail, and
   ];
   t2.runIds = [r2.id];
 
+  t1.demo = true; t2.demo = true;
   S.threads = [t2, t1]; // newest first
   S.runs[r1.id]=r1; S.runs[r2.id]=r2;
   S.activeThreadId = t1.id;
@@ -1231,17 +1245,21 @@ function renderOps(){
       ${antlerSVG(34)}<div class="e-title">No operations yet</div>
       <div class="e-sub">Brief the agent below — research, a build, a report. Runs and their telemetry gather here.</div></div>`;
   } else {
-    list.innerHTML = S.threads.map(t=>{
+    const ordered = (S.mode==='live' && S.liveOk)
+      ? [...S.threads].sort((a,b)=>((a.demo?1:0)-(b.demo?1:0)) || (b.createdAt-a.createdAt))
+      : S.threads;
+    list.innerHTML = ordered.map(t=>{
       const latest = S.runs[t.runIds[t.runIds.length-1]];
       return `<button class="thread-card ${t.id===S.activeThreadId?'sel':''}" data-th="${t.id}">
         <span class="tc-title">${esc(t.title)}</span>
-        <span class="tc-meta">${statusChip(t.status)}<span>${fmtAgo(t.createdAt)}</span>${latest?`<span>${fmtTok(latest.tokens)} tok</span>`:''}</span>
+        <span class="tc-meta">${statusChip(t.status)}${t.demo?'<span class="tag" style="font-size:9px;padding:1px 5px;letter-spacing:.08em">DEMO</span>':''}<span>${fmtAgo(t.createdAt)}</span>${latest?`<span>${fmtTok(latest.tokens)} tok</span>`:''}</span>
       </button>`;
     }).join('');
     $$('.thread-card', list).forEach(b=>b.addEventListener('click',()=>{
       S.activeThreadId = b.dataset.th;
       const t = S.threads.find(x=>x.id===S.activeThreadId);
       if (t && t.runIds.length) S.watchRunId = t.runIds[t.runIds.length-1];
+      if (S.mode==='live' && S.liveOk && t && t.remoteId && !t.messages.length) Live.loadThread(t);
       renderOps();
     }));
   }
@@ -1251,8 +1269,10 @@ function renderOps(){
 function renderChat(){
   const head = $('#chat-head'), scroll = $('#chat-scroll');
   const t = S.threads.find(x=>x.id===S.activeThreadId);
+  const narrowNew = `<button class="btn sm narrow-new" id="btn-new-narrow">New</button>`;
   if (!t){
-    head.innerHTML = `<div class="ch-title" style="color:var(--ink-3)">New operation</div>`;
+    head.innerHTML = `<div class="ch-title" style="color:var(--ink-3)">New operation</div>${narrowNew}`;
+    const nn0 = $('#btn-new-narrow'); if (nn0) nn0.addEventListener('click',()=>{ S.activeThreadId=null; renderOps(); $('#composer-input').focus(); });
     scroll.innerHTML = `<div class="empty">${antlerSVG(44)}
       <div class="e-title">The blind is set</div>
       <div class="e-sub">Nothing dispatched in this thread. Type a brief below — the lead agent decomposes it, the herd fans out, and you watch it all from Telemetry.</div></div>`;
@@ -1260,6 +1280,7 @@ function renderChat(){
   }
   const run = S.runs[t.runIds[t.runIds.length-1]];
   head.innerHTML = `<div class="ch-title">${esc(t.title)}</div>
+    ${narrowNew}
     ${run ? `<button class="btn sm" id="btn-watch">Watch in Telemetry</button>` : ''}
     <button class="iconbtn" id="btn-del-thread" title="Delete operation" aria-label="Delete operation">
       <svg width="13" height="13" viewBox="0 0 15 15" fill="none" aria-hidden="true"><path d="M2.5 4h10M6 4V2.5h3V4M4 4l.7 9h5.6L11 4M6.2 6.5v4M8.8 6.5v4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
@@ -1267,9 +1288,11 @@ function renderChat(){
     ${statusChip(t.status)}`;
   const watch = $('#btn-watch'); if (watch) watch.addEventListener('click',()=>{ S.watchRunId = run.id; setView('tele'); });
   $('#btn-del-thread').addEventListener('click',()=>deleteThread(t));
+  const nn = $('#btn-new-narrow'); if (nn) nn.addEventListener('click',()=>{ S.activeThreadId=null; renderOps(); $('#composer-input').focus(); });
   scroll.innerHTML = t.messages.map(m=>{
     if (m.who==='you') return `<div class="msg user"><div class="m-who">YOU · ${fmtT(m.ts)}</div><div class="m-body">${esc(m.body)}</div></div>`;
-    return `<div class="msg agent"><div class="m-who"><span style="color:${m.err?'var(--crit)':'var(--series)'}">ATLAS</span> · lead · ${fmtT(m.ts)}</div><div class="m-body">${md(m.body)}</div></div>`;
+    const thinkBlock = m.think ? `<details style="margin-top:7px"><summary style="cursor:pointer;font:600 10px var(--f-mono);letter-spacing:.1em;color:var(--ink-3)">REASONING</summary><div style="font-size:12px;color:var(--ink-3);line-height:1.55;padding:6px 0 0;border-left:2px solid var(--border-strong);padding-left:10px;margin-top:6px">${esc(m.think).replace(/\n/g,'<br>')}</div></details>` : '';
+    return `<div class="msg agent"><div class="m-who"><span style="color:${m.err?'var(--crit)':'var(--series)'}">ATLAS</span> · lead · ${fmtT(m.ts)}</div><div class="m-body">${md(m.body)}${thinkBlock}</div></div>`;
   }).join('')
   + (t.status==='run' ? `<div class="msg agent"><div class="m-who"><span style="color:var(--series)">ATLAS</span> · lead · working</div><div class="m-body"><span style="color:var(--ink-3)">run in flight — watch the herd in Telemetry</span> <span class="cursor-blink"></span></div></div>` : '');
   scroll.scrollTop = scroll.scrollHeight;
@@ -1668,7 +1691,45 @@ const Live = {
         stats: { entries: (mem.facts||[]).length, lastReload: mem.lastUpdated ? +new Date(mem.lastUpdated) : null, store: 'gateway rev '+(mem.revision??'—') } };
     } catch(e){ note('memory', e); }
     try { S.mcp = await this.req('/api/mcp/config'); } catch(e){ note('mcp', e); }
+    await this.hydrateThreads();
     renderAll();
+  },
+  async hydrateThreads(){
+    /* pull the gateway's existing threads into Operations */
+    try {
+      const list = await this.req('/api/threads/search', {method:'POST', body: JSON.stringify({limit: 25})});
+      for (const rt of (Array.isArray(list)?list:[])){
+        if (S.threads.find(t=>t.remoteId===rt.thread_id)) continue;
+        const meta = rt.metadata||{};
+        S.threads.push({ id: nid('th'), remoteId: rt.thread_id, live:true,
+          title: meta.display_name || meta.title || ('gateway thread '+String(rt.thread_id).slice(0,8)),
+          createdAt: rt.created_at ? +new Date(rt.created_at) : Date.now(),
+          status: rt.status==='busy' ? 'run' : rt.status==='error' ? 'crit' : 'ok',
+          messages: [], runIds: [] });
+      }
+    } catch(e){ note('threads-search', e); }
+  },
+  async loadThread(t){
+    /* lazy-load a gateway thread's message history on first open */
+    try {
+      const msgs = await this.req(`/api/threads/${t.remoteId}/messages?limit=60`);
+      const out = [];
+      for (const m of (Array.isArray(msgs)?msgs:[])){
+        const et = String(m.event_type||m.type||'');
+        const isHuman = /human|user/i.test(et);
+        const isAI = !isHuman && /ai/i.test(et);
+        if (!isHuman && !isAI) continue;
+        let body = m.content;
+        if (body && typeof body==='object' && !Array.isArray(body) && 'content' in body) body = body.content;
+        if (Array.isArray(body)) body = body.map(p=>p?.text||'').join('');
+        if (typeof body !== 'string') body = JSON.stringify(body).slice(0,400);
+        const ts = m.created_at ? +new Date(m.created_at) : Date.now();
+        if (isHuman) out.push({who:'you', ts, body});
+        else { const f = stripThink(body); out.push({who:'atlas', ts, body: f.text || body, think: f.think || undefined}); }
+      }
+      if (out.length){ t.messages = out; renderChat(); }
+      else pushToastOnce('History','no displayable messages on that gateway thread');
+    } catch(e){ note('thread-messages', e); toast('History','could not load thread history — '+e.message, true); }
   },
   async putSkill(s){
     try { await this.req('/api/skills/'+encodeURIComponent(s.id), {method:'PUT', body: JSON.stringify({enabled:s.enabled})}); }
@@ -1824,7 +1885,8 @@ const Live = {
         }
         if (files.length) toast('Artifacts', files.length+' file'+(files.length===1?'':'s')+' pulled from the gateway');
       }} catch(e){ note('workspace-changes', e); }
-      thread.messages.push({who:'atlas', ts:Date.now(), body: acc || 'Run finished — the stream carried no assistant text this console recognized. The raw event log is on the gateway: GET /api/threads/'+thread.remoteId+'/runs/'+(run.remoteRunId||'…')+'/events.'});
+      const fin = stripThink(acc);
+      thread.messages.push({who:'atlas', ts:Date.now(), think: fin.think || undefined, body: fin.text || 'Run finished — the stream carried no assistant text this console recognized. The raw event log is on the gateway: GET /api/threads/'+thread.remoteId+'/runs/'+(run.remoteRunId||'…')+'/events.'});
     } catch(e){
       run.status='crit'; run.endedAt=Date.now(); thread.status='crit';
       run.agents.forEach(a=>{ if (a.status==='run') a.status='crit'; });
@@ -1838,6 +1900,8 @@ const Live = {
   },
 };
 function note(what, e){ console.warn('[blind] '+what+':', e.message); }
+const _onceToasts = new Set();
+function pushToastOnce(k, msg){ if (_onceToasts.has(k)) return; _onceToasts.add(k); toast(k, msg); }
 
 /* =========================================================================
    toasts, clock, boot
@@ -1968,6 +2032,18 @@ function boot(){
     }
   }, 1000);
   $('#top-clock').textContent = fmtClock(new Date());
+
+  /* gateway watchdog — notice when the wire goes quiet */
+  setInterval(async ()=>{
+    if (S.mode!=='live' || !S.liveOk) return;
+    try {
+      const r = await fetch(Live.base()+'/api/models', {credentials:'include', headers:Live.headers(false)});
+      if (!r.ok) throw new Error(r.status);
+    } catch(_){
+      S.liveOk = false; renderTop(); renderStrip();
+      toast('Gateway lost','the wire went quiet — check Station → Connection', true);
+    }
+  }, 30000);
 
   renderAll();
 }
