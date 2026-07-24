@@ -662,7 +662,7 @@ GET&nbsp;&nbsp;/api/memory · POST /api/memory/reload · GET/PUT /api/mcp/config
 
   <!-- ======= bottom instrument strip ======= -->
   <footer class="strip" aria-hidden="true">
-    <span>BLIND v0.6</span><span class="sep">|</span>
+    <span>BLIND v0.7</span><span class="sep">|</span>
     <span id="strip-mode">feed: mock</span><span class="sep">|</span>
     <span id="strip-run">no active run</span>
     <span class="spacer"></span>
@@ -1266,7 +1266,8 @@ function renderStrip(){
   $('#strip-run').textContent = run && run.status==='run'
     ? `run ${run.id} · ${run.agents.filter(a=>a.status==='run').length} agents working`
     : 'no active run';
-  $('#strip-tokens').textContent = 'burn ' + fmtTok(S.totalTokens) + ' tok';
+  const liveTot = Object.values(S.runs).filter(r=>r.live).reduce((a,r)=>a+(r.tokens|0),0);
+  $('#strip-tokens').textContent = 'burn ' + fmtTok(S.mode==='live' ? liveTot : S.totalTokens) + ' tok';
   const notes = ['quiet in the field','wind from the northwest','glass steady','herd accounted for'];
   const running = run && run.status==='run';
   $('#strip-note').textContent = running ? 'eyes on the herd' : notes[Math.floor(Date.now()/30000)%notes.length];
@@ -1415,7 +1416,12 @@ function renderTele(){
   }
   const t = S.threads.find(x=>x.id===run.threadId);
   const dur = (run.endedAt||Date.now()) - run.startedAt;
-  const others = S.threads.filter(x=>x.runIds.length && x.id!==run.threadId);
+  const allRuns = Object.values(S.runs)
+    .filter(r=>r.id!==run.id)
+    .sort((a,b)=>b.startedAt-a.startedAt)
+    .slice(0,20)
+    .map(r=>{ const th=S.threads.find(x=>x.id===r.threadId);
+      return { id:r.id, label:(th?th.title.slice(0,26):'?')+' · '+String(r.remoteRunId||r.id).slice(0,8)+' · '+r.status }; });
   main.innerHTML = `
     <div class="run-head">
       <div class="rh-body">
@@ -1427,9 +1433,9 @@ function renderTele(){
           <span>${run.agents.length} agents</span>
           ${run.status==='run' ? `<span>·</span><button class="btn sm danger" id="btn-stop-run">Stop run</button>` : ''}
           <span>·</span><button class="btn sm" id="btn-field-report">Field report</button>
-          ${others.length?`<span>·</span><select class="input" id="tele-pick" style="width:auto;padding:2px 24px 2px 8px;font-size:11px;font-family:var(--f-mono);background-color:transparent">
+          ${allRuns.length?`<span>·</span><select class="input" id="tele-pick" style="width:auto;padding:2px 24px 2px 8px;font-size:11px;font-family:var(--f-mono);background-color:transparent">
             <option value="">other runs…</option>
-            ${others.map(o=>`<option value="${o.runIds[o.runIds.length-1]}">${esc(o.title.slice(0,42))}</option>`).join('')}
+            ${allRuns.map(o=>`<option value="${o.id}">${esc(o.label)}</option>`).join('')}
           </select>`:''}
         </div>
       </div>
@@ -1777,7 +1783,18 @@ const Live = {
         if (isHuman) out.push({who:'you', ts, body});
         else { const f = stripThink(body); out.push({who:'atlas', ts, body: f.text || body, think: f.think || undefined}); }
       }
-      if (out.length){ t.messages = out; renderChat(); }
+      if (out.length){
+        t.messages = out;
+        if (/^gateway thread /.test(t.title)){
+          const firstHuman = out.find(m=>m.who==='you');
+          if (firstHuman && firstHuman.body){
+            const nt = String(firstHuman.body).trim().replace(/\s+/g,' ');
+            t.title = nt.length<64 ? nt : nt.slice(0,61).replace(/\s+\S*$/,'')+'…';
+            renderOps();
+          }
+        }
+        renderChat();
+      }
       else pushToastOnce('History','no displayable messages on that gateway thread');
     } catch(e){ note('thread-messages', e); toast('History','could not load thread history — '+e.message, true); }
   },
