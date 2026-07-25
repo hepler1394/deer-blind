@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Deer Blind — a field console for DeerFlow 2.0</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 26 26'%3E%3Cpath d='M8.2 21.5c.3-4.4-.6-7.4-2.9-9.9M5.3 11.6c-1.6-1.7-2.2-3.5-2-6.1M5.3 11.6c-2 .1-3.3-.4-4.3-1.6M6.1 8.4C5 7.2 4.6 5.9 4.7 4M8.2 14.7c-1.8-.3-3-1-3.9-2.2M17.8 21.5c-.3-4.4.6-7.4 2.9-9.9M20.7 11.6c1.6-1.7 2.2-3.5 2-6.1M20.7 11.6c2 .1 3.3-.4 4.3-1.6M19.9 8.4c1.1-1.2 1.5-2.5 1.4-4.4M17.8 14.7c1.8-.3 3-1 3.9-2.2' stroke='%23A9B2A8' stroke-width='1.5' stroke-linecap='round' fill='none'/%3E%3Ccircle cx='13' cy='21.5' r='2.1' fill='%23F26322'/%3E%3C/svg%3E">
+</head>
+<body>
+<div id="app">
+
+  <!-- ======= top bar ======= -->
+  <header class="topbar">
+    <div class="wordmark" title="Deer Blind — you sit in the blind, the herd does the work">
+      <svg width="26" height="26" viewBox="0 0 26 26" fill="none" aria-hidden="true">
+        <!-- antlers, hand-drawn-ish -->
+        <path d="M8.2 21.5c.3-4.4-.6-7.4-2.9-9.9M5.3 11.6c-1.6-1.7-2.2-3.5-2-6.1M5.3 11.6c-2 .1-3.3-.4-4.3-1.6M6.1 8.4C5 7.2 4.6 5.9 4.7 4M8.2 14.7c-1.8-.3-3-1-3.9-2.2"
+          stroke="#A9B2A8" stroke-width="1.5" stroke-linecap="round"/>
+        <path d="M17.8 21.5c-.3-4.4.6-7.4 2.9-9.9M20.7 11.6c1.6-1.7 2.2-3.5 2-6.1M20.7 11.6c2 .1 3.3-.4 4.3-1.6M19.9 8.4c1.1-1.2 1.5-2.5 1.4-4.4M17.8 14.7c1.8-.3 3-1 3.9-2.2"
+          stroke="#A9B2A8" stroke-width="1.5" stroke-linecap="round"/>
+        <circle cx="13" cy="21.5" r="2.1" fill="#F26322"/>
+      </svg>
+      <div>
+        <div class="wm-name">DEER BLIND</div>
+        <div class="wm-sub">field console · deerflow 2.0</div>
+      </div>
+    </div>
+    <div class="top-spacer"></div>
+    <span class="top-url" id="top-url">mock feed — no gateway attached</span>
+    <button class="mode-pill mock" id="mode-pill" title="Connection state — configure under Station">
+      <span class="dot"></span><span id="mode-pill-label">MOCK</span>
+    </button>
+    <span class="top-clock" id="top-clock" aria-hidden="true">--:--:--</span>
+  </header>
+
+  <!-- ======= left rail ======= -->
+  <nav class="rail" aria-label="Console sections">
+    <div class="rail-eyebrow" style="padding-top:var(--s2)">Field</div>
+    <button class="rail-item" data-nav="ops" aria-current="page">
+      <svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden="true"><path d="M2 3.5h11M2 7.5h11M2 11.5h6.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      Operations <span class="count" id="nav-count-ops"></span>
+    </button>
+    <button class="rail-item" data-nav="tele">
+      <svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden="true"><path d="M1.5 11.5l3-4 2.5 2.5 3.5-5 3 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Telemetry <span class="count" id="nav-count-tele"></span>
+    </button>
+    <button class="rail-item" data-nav="arts">
+      <svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden="true"><path d="M8.5 1.5H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V5m-3.5-3.5L12 5m-3.5-3.5V5H12" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
+      Artifacts <span class="count" id="nav-count-arts"></span>
+    </button>
+    <div class="rail-eyebrow">Rig</div>
+    <button class="rail-item" data-nav="station">
+      <svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden="true"><circle cx="7.5" cy="7.5" r="2.2" stroke="currentColor" stroke-width="1.4"/><path d="M7.5 1.5v2m0 8v2m6-6h-2m-8 0h-2m9.6-4.1l-1.4 1.4M4.3 10.7l-1.4 1.4m0-8.2l1.4 1.4m6.4 6.4l1.4 1.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+      Station
+    </button>
+    <div class="rail-foot">
+      <div class="fnote">gateway target<br><span id="rail-url" style="color:var(--ink-2)">localhost:2026</span></div>
+    </div>
+  </nav>
+
+  <!-- ======= main ======= -->
+  <main class="main">
+
+    <!-- OPERATIONS -->
+    <section class="view active" id="view-ops" aria-label="Operations">
+      <div class="ops">
+        <div class="ops-list">
+          <div class="ops-list-h">
+            <h2>Operations</h2>
+            <button class="btn sm" id="btn-new-thread">New</button>
+          </div>
+          <div class="ops-scroll" id="thread-list"></div>
+        </div>
+        <div class="ops-chat">
+          <div class="chat-head" id="chat-head"></div>
+          <div class="chat-scroll" id="chat-scroll"></div>
+          <div class="composer">
+            <div class="composer-box">
+              <textarea id="composer-input" rows="2" placeholder="Brief the agent — a research question, a build task, a report to draft…" aria-label="Task brief"></textarea>
+              <div class="composer-tools">
+                <select class="input" id="composer-model" aria-label="Model"></select>
+                <span id="composer-skills" style="display:flex;gap:6px"></span>
+                <span style="flex:1"></span>
+                <button class="iconbtn" id="btn-attach" title="Attach files to the thread" aria-label="Attach files">
+                  <svg width="14" height="14" viewBox="0 0 15 15" fill="none" aria-hidden="true"><path d="M13 7.5l-5 5a3.2 3.2 0 0 1-4.5-4.5l5.5-5.5a2.1 2.1 0 0 1 3 3L6.6 10.9a1 1 0 0 1-1.5-1.5L9.8 4.7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+                </button>
+                <button class="btn primary" id="btn-dispatch">Dispatch</button>
+              </div>
+              <div id="pending-files" style="display:none;padding:0 12px 10px;gap:6px;flex-wrap:wrap"></div>
+            </div>
+            <div class="composer-hint"><span class="kbd">Enter</span> dispatch &nbsp;·&nbsp; <span class="kbd">Shift+Enter</span> newline &nbsp;·&nbsp; sub-agents fan out automatically on multi-part briefs</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TELEMETRY -->
+    <section class="view" id="view-tele" aria-label="Telemetry">
+      <div class="tele">
+        <div class="tele-main" id="tele-main"></div>
+        <aside class="tele-side" id="tele-side" aria-label="Run instruments"></aside>
+      </div>
+    </section>
+
+    <!-- ARTIFACTS -->
+    <section class="view" id="view-arts" aria-label="Artifacts">
+      <div class="arts">
+        <div class="arts-list" id="arts-list"></div>
+        <div class="arts-view" id="arts-view"></div>
+      </div>
+    </section>
+
+    <!-- STATION -->
+    <section class="view" id="view-station" aria-label="Station">
+      <div class="station">
+        <div class="station-inner">
+          <h2 class="page-t">Station</h2>
+          <p class="page-sub">Where the console meets your DeerFlow gateway — connection, models, skills, memory, MCP.</p>
+          <div class="tabs" role="tablist" aria-label="Station sections">
+            <button class="tab" role="tab" aria-selected="true" data-tab="conn">Connection</button>
+            <button class="tab" role="tab" aria-selected="false" data-tab="models">Models</button>
+            <button class="tab" role="tab" aria-selected="false" data-tab="skills">Skills</button>
+            <button class="tab" role="tab" aria-selected="false" data-tab="memory">Memory</button>
+            <button class="tab" role="tab" aria-selected="false" data-tab="mcp">MCP</button>
+            <button class="tab" role="tab" aria-selected="false" data-tab="about">About</button>
+          </div>
+
+          <div class="tabpanel active" id="tab-conn" role="tabpanel">
+            <div class="frow">
+              <div class="fr-l"><label for="conn-mode">Feed</label>
+                <div class="fr-d">Mock runs entirely in this page. Live talks to a running DeerFlow 2.0 gateway.</div></div>
+              <div class="fr-c">
+                <select class="input" id="conn-mode" style="max-width:260px">
+                  <option value="mock">Mock — simulated herd, no backend</option>
+                  <option value="live">Live — connect to a gateway</option>
+                </select>
+              </div>
+            </div>
+            <div class="frow">
+              <div class="fr-l"><label for="conn-url">Gateway URL</label>
+                <div class="fr-d">Default install serves UI + API on port 2026.</div></div>
+              <div class="fr-c">
+                <input class="input mono" id="conn-url" value="http://localhost:2026" style="max-width:340px" spellcheck="false">
+                <div style="display:flex;gap:8px;align-items:center">
+                  <button class="btn" id="btn-test-conn">Test connection</button>
+                  <span id="conn-latency" class="lr-mono"></span>
+                </div>
+                <div class="conn-result" id="conn-result" hidden></div>
+              </div>
+            </div>
+            <div class="frow">
+              <div class="fr-l"><label>Cross-origin note</label>
+                <div class="fr-d">This console is served from its own origin, so the gateway must allow it.</div></div>
+              <div class="fr-c">
+                <div class="helpbox"><span class="hb-t">BEFORE GOING LIVE</span>
+                  DeerFlow ships with CORS off (same-origin only). Start the gateway with your console's origin allow-listed:<br><br>
+                  <code>GATEWAY_CORS_ORIGINS=&lt;this-page-origin&gt; make dev</code><br><br>
+                  Opened as a local file? Serve it instead: <code>python -m http.server 4173</code> then allow <code>http://localhost:4173</code>.<br><br>
+                  <span class="hb-t">IF YOU GET 401s</span>
+                  The gateway's auth is on. Either sign in to DeerFlow's own UI in this browser first (localhost cookies are shared across ports — this console rides the same session and CSRF token), or for local dev start the gateway with <code>DEER_FLOW_AUTH_DISABLED=1</code>.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="tabpanel" id="tab-models" role="tabpanel"></div>
+          <div class="tabpanel" id="tab-skills" role="tabpanel"></div>
+          <div class="tabpanel" id="tab-memory" role="tabpanel"></div>
+          <div class="tabpanel" id="tab-mcp" role="tabpanel"></div>
+
+          <div class="tabpanel" id="tab-about" role="tabpanel">
+            <div class="frow">
+              <div class="fr-l"><label>Deer Blind</label>
+                <div class="fr-d">A single-file console. No build step, no dependencies, nothing phones home.</div></div>
+              <div class="fr-c">
+                <div style="font-size:12.5px;color:var(--ink-2);line-height:1.7">
+                  v0.1 · one HTML file · hand-rolled charts, markdown and mock engine.<br>
+                  Named for the hut you watch deer from. You sit in the blind; the herd does the work.
+                </div>
+              </div>
+            </div>
+            <div class="frow">
+              <div class="fr-l"><label>DeerFlow releases</label>
+                <div class="fr-d">Checks GitHub's public releases API — the one outside call in this file, and only on demand.</div></div>
+              <div class="fr-c">
+                <div style="display:flex;gap:8px;align-items:center">
+                  <button class="btn" id="btn-check-release">Check latest release</button>
+                  <span class="lr-mono" id="release-note"></span>
+                </div>
+                <div class="conn-result" id="release-result" hidden></div>
+              </div>
+            </div>
+            <div class="frow">
+              <div class="fr-l"><label>Gateway endpoints wired</label>
+                <div class="fr-d">What the Live adapter targets, from the backend docs.</div></div>
+              <div class="fr-c"><div class="helpbox" style="font-family:var(--f-mono);font-size:11.5px;line-height:2">
+GET&nbsp;&nbsp;/health · GET /api/models<br>
+POST /api/threads · DELETE /api/threads/{id}<br>
+POST /api/threads/{id}/runs/stream&nbsp;&nbsp;(SSE: values · messages · end)<br>
+POST /api/threads/{id}/runs/{run}/cancel<br>
+GET&nbsp;&nbsp;/api/threads/{id}/token-usage · /runs/{run}/workspace-changes<br>
+POST /api/threads/{id}/uploads · GET /api/threads/{id}/artifacts/{path}<br>
+GET&nbsp;&nbsp;/api/skills · PUT /api/skills/{name} · POST /api/skills/install<br>
+GET&nbsp;&nbsp;/api/memory · POST /api/memory/reload · GET/PUT /api/mcp/config<br>
+<span style="color:var(--ink-3)">verified against the deer-flow backend source and a live gateway boot</span></div></div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ======= bottom instrument strip ======= -->
+  <footer class="strip" aria-hidden="true">
+    <span>BLIND v0.9</span><span class="sep">|</span>
+    <span id="strip-mode">feed: mock</span><span class="sep">|</span>
+    <span id="strip-run">no active run</span>
+    <span class="spacer"></span>
+    <span class="st-tokens" id="strip-tokens">burn 0 tok</span><span class="sep">|</span>
+    <span id="strip-note">quiet in the field</span>
+  </footer>
+</div>
+
+<div id="toasts" aria-live="polite"></div>
+
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>
