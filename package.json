@@ -1,7 +1,23 @@
 {
+  "name": "deer-blind",
+  "version": "0.9.0",
+  "description": "Deer Blind — a field console for DeerFlow 2.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && node -e \"require('fs').copyFileSync('dist/index.html','deer-blind.html')\"",
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "vite": "8.1.5",
+    "vite-plugin-singlefile": "2.3.3"
+  },
   "dependencies": {
-    "@fontsource/chakra-petch": "^5.3.0",
-    "@fontsource/ibm-plex-mono": "^5.3.0",
-    "@fontsource/ibm-plex-sans": "^5.3.0"
+    "@fontsource/chakra-petch": "5.3.0",
+    "@fontsource/ibm-plex-mono": "5.3.0",
+    "@fontsource/ibm-plex-sans": "5.3.0"
   }
 }
