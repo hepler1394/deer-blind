@@ -26,7 +26,7 @@ function boot(){
     $$('.tabpanel').forEach(p=>p.classList.remove('active'));
     $('#tab-'+tb.dataset.tab).classList.add('active');
   }));
-  document.querySelector('.tabs').addEventListener('keydown', e=>{
+  $('.tabs').addEventListener('keydown', (e: any)=>{
     if (e.key!=='ArrowRight' && e.key!=='ArrowLeft') return;
     const tabs=$$('.tab'); const i=tabs.findIndex(t=>t.getAttribute('aria-selected')==='true');
     const n=tabs[(i+(e.key==='ArrowRight'?1:tabs.length-1))%tabs.length]; n.click(); n.focus();

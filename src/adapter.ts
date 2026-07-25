@@ -15,7 +15,7 @@ const Live = {
     const c = this.csrf(); if (c) h['X-CSRF-Token'] = c;
     return h;
   },
-  async req(path, opts={}){
+  async req(path, opts: any = {}){
     const r = await fetch(this.base() + path, {
       credentials:'include', headers:this.headers(!(opts.body instanceof FormData)), ...opts });
     if (r.status===401) throw new Error('401 — gateway auth is on. Sign in to the DeerFlow UI in this browser (cookie is shared across localhost ports), or run the gateway with DEER_FLOW_AUTH_DISABLED=1 for local dev.');

@@ -12,7 +12,7 @@ export function wireHub(f: Record<string, Fn>){
   renderAll = f.renderAll; renderIfActive = f.renderIfActive; renderStrip = f.renderStrip;
   renderNavCounts = f.renderNavCounts; renderChat = f.renderChat; renderOps = f.renderOps; renderTop = f.renderTop;
 }
-function toast(k, msg, isErr){
+function toast(k, msg, isErr?){
   const t = document.createElement('div');
   t.className = 'toast'+(isErr?' crit':'');
   t.innerHTML = `<span class="t-k">${esc(k).toUpperCase()}</span>${esc(msg)}`;

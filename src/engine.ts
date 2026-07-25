@@ -11,7 +11,7 @@ const nid = p => `${p}_${(_id++).toString(36)}`;
 function seedMockWorld(){
   const now = Date.now();
   /* finished demo thread with a full run trail */
-  const t1 = { id: nid('th'), title: 'Map the US retail media networks — who is growing, who is stalling',
+  const t1: any = { id: nid('th'), title: 'Map the US retail media networks — who is growing, who is stalling',
     createdAt: now - 1000*60*38, status: 'ok', messages: [], runIds: [] };
   const r1 = mkRun(t1.id, now - 1000*60*38);
   r1.status='ok'; r1.endedAt = now - 1000*60*31;
@@ -61,7 +61,7 @@ Four artifacts in the tray: the field scan, a spend chart, the source trail, and
   t1.runIds = [r1.id];
 
   /* failed run thread — the error path, honestly */
-  const t2 = { id: nid('th'), title: 'Transcribe + chapter podcast ep. 214', createdAt: now - 1000*60*12, status:'crit', messages: [], runIds: [] };
+  const t2: any = { id: nid('th'), title: 'Transcribe + chapter podcast ep. 214', createdAt: now - 1000*60*12, status:'crit', messages: [], runIds: [] };
   const r2 = mkRun(t2.id, now - 1000*60*12);
   r2.status='crit'; r2.endedAt = now - 1000*60*10;
   r2.agents = [
@@ -96,16 +96,16 @@ Four artifacts in the tray: the field scan, a spend chart, the source trail, and
   S.skills = JSON.parse(JSON.stringify(MOCK_SKILLS));
   S.memory = MOCK_MEMORY; S.mcp = JSON.parse(JSON.stringify(MOCK_MCP));
 }
-function mkRun(threadId, startedAt){
+function mkRun(threadId, startedAt): any {
   const r = { id: nid('run'), threadId, status:'run', startedAt, endedAt:null,
     agents: [], events: [], artifacts: [], tokens: 0, toolCalls: 0, tokSeries: [] };
   return r;
 }
-function mkAgent(name, kind, task, st, tok, ctx, depth){
+function mkAgent(name, kind, task, st, tok, ctx, depth): any {
   return { id: nid('ag'), name, kind, task, status: st, tokens: tok, ctxUsed: ctx, depth };
 }
 const ev = (ts, agent, kind, msg) => ({ ts, agent, kind, msg });
-const art = (name, type, body, threadId) => ({ id: nid('art'), name, type, body, threadId, bytes: new Blob([body]).size, ts: Date.now() });
+const art = (name, type, body, threadId): any => ({ id: nid('art'), name, type, body, threadId, bytes: new Blob([body]).size, ts: Date.now() });
 
 /* ---------- live mock run (the show) ---------- */
 function startMockRun(thread, brief){

@@ -1,6 +1,6 @@
 // state.ts — the one store
 /* ---------- state ---------- */
-const S = {
+const S: any = {
   mode: 'mock',                 // 'mock' | 'live'
   gatewayUrl: 'http://localhost:2026',
   liveOk: false,

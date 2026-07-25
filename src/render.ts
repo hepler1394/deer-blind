@@ -25,16 +25,16 @@ function renderView(v){
 }
 function renderAll(){ renderNavCounts(); renderTop(); renderStrip(); renderView(S.view); }
 
-function statusChip(st, label){
+function statusChip(st, label?){
   const map = { run:['run','RUNNING'], ok:['ok','OK'], warn:['warn','DEGRADED'], crit:['crit','FAILED'], idle:['idle','IDLE'], queue:['queue','QUEUED'] };
   const [cls, text] = map[st] || map.idle;
   return `<span class="status ${cls}"><span class="sdot"></span>${label||text}</span>`;
 }
 function renderNavCounts(){
   $('#nav-count-ops').textContent = S.threads.length || '';
-  const running = Object.values(S.runs).filter(r=>r.status==='run').length;
+  const running = Object.values<any>(S.runs).filter(r=>r.status==='run').length;
   $('#nav-count-tele').textContent = running ? running+' live' : '';
-  const arts = Object.values(S.runs).flatMap(r=>r.artifacts||[]).length;
+  const arts = Object.values<any>(S.runs).flatMap(r=>r.artifacts||[]).length;
   $('#nav-count-arts').textContent = arts || '';
 }
 function renderTop(){
@@ -51,7 +51,7 @@ function renderStrip(){
   $('#strip-run').textContent = run && run.status==='run'
     ? `run ${run.id} · ${run.agents.filter(a=>a.status==='run').length} agents working`
     : 'no active run';
-  const liveTot = Object.values(S.runs).filter(r=>r.live).reduce((a,r)=>a+(r.tokens|0),0);
+  const liveTot = Object.values<any>(S.runs).filter(r=>r.live).reduce((a,r)=>a+(r.tokens|0),0);
   $('#strip-tokens').textContent = 'burn ' + fmtTok(S.mode==='live' ? liveTot : S.totalTokens) + ' tok';
   const notes = ['quiet in the field','wind from the northwest','glass steady','herd accounted for'];
   const running = run && run.status==='run';
@@ -213,7 +213,7 @@ function renderTele(){
   }
   const t = S.threads.find(x=>x.id===run.threadId);
   const dur = (run.endedAt||Date.now()) - run.startedAt;
-  const allRuns = Object.values(S.runs)
+  const allRuns = Object.values<any>(S.runs)
     .filter(r=>r.id!==run.id)
     .sort((a,b)=>b.startedAt-a.startedAt)
     .slice(0,20)

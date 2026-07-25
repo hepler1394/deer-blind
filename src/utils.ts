@@ -1,7 +1,7 @@
 // utils.ts — helpers, formatting, markdown, reasoning-stripper
 /* ---------- tiny utils ---------- */
-const $  = (s, r=document) => r.querySelector(s);
-const $$ = (s, r=document) => [...r.querySelectorAll(s)];
+const $  = (s: string, r: any = document): any => r.querySelector(s);
+const $$ = (s: string, r: any = document): any[] => [...r.querySelectorAll(s)];
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmtTok = n => n >= 1e6 ? (n/1e6).toFixed(1).replace(/\.0$/,'')+'M' : n >= 1e3 ? (n/1e3).toFixed(1).replace(/\.0$/,'')+'k' : String(n|0);
 const fmtNum = n => n.toLocaleString('en-US');
