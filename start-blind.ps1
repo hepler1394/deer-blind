@@ -1,5 +1,8 @@
 # start-blind.ps1 - one click: Ollama + DeerFlow gateway + the console, live.
+# Everything runs hidden in the background; the gateway logs to deer-flow-gateway.log.
+# stop-deer-blind.cmd shuts it all down again (Ollama is left alone).
 $ErrorActionPreference = 'SilentlyContinue'
+Remove-Item Env:VIRTUAL_ENV -ErrorAction SilentlyContinue   # scrub inherited venvs (silences a uv warning)
 $root     = Split-Path -Parent $MyInvocation.MyCommand.Path
 $deerflow = 'D:\Dev\GitHub\deer-flow'
 $uv       = 'C:\Users\Cory\.local\bin\uv.exe'
@@ -14,32 +17,34 @@ function Wait-Port([int]$p, [int]$seconds, [string]$label){
     if (Test-Port $p) { Write-Host "  $label is up." -ForegroundColor Green; return $true }
     Start-Sleep 1
   }
-  Write-Host "  $label did not come up in $seconds s - check its window." -ForegroundColor Yellow
+  Write-Host "  $label did not come up in $seconds s - see deer-flow-gateway.log." -ForegroundColor Yellow
   $false
 }
 
 Write-Host ''
-Write-Host '  DEER BLIND - starting the stack' -ForegroundColor DarkYellow
+Write-Host '  DEER BLIND - starting the stack (background)' -ForegroundColor DarkYellow
 Write-Host ''
 
 # 1. Ollama - the models
 if (Test-Port 11434) { Write-Host '  Ollama is already up.' -ForegroundColor Green }
 else {
   Write-Host '  Starting Ollama...'
-  Start-Process ollama -ArgumentList 'serve' -WindowStyle Minimized
+  Start-Process ollama -ArgumentList 'serve' -WindowStyle Hidden
   [void](Wait-Port 11434 20 'Ollama')
 }
 
 # 2. The DeerFlow gateway
 if (Test-Port 8001) { Write-Host '  Gateway is already up.' -ForegroundColor Green }
 else {
-  Write-Host '  Starting the DeerFlow gateway (its log stays in its own window)...'
-  $cmd = "cd '$deerflow\backend'; " +
+  Write-Host '  Starting the DeerFlow gateway (log: deer-flow-gateway.log)...'
+  $glog = Join-Path $root 'deer-flow-gateway.log'
+  $cmd = "Remove-Item Env:VIRTUAL_ENV -ErrorAction SilentlyContinue; " +
+         "cd '$deerflow\backend'; " +
          "`$env:DEER_FLOW_AUTH_DISABLED='1'; " +
          "`$env:GATEWAY_CORS_ORIGINS='http://localhost:4173'; " +
          "`$env:PYTHONPATH='.'; " +
-         "& '$uv' run uvicorn app.gateway.app:app --host 127.0.0.1 --port 8001"
-  Start-Process powershell -ArgumentList '-NoProfile','-NoExit','-Command', $cmd
+         "& '$uv' run uvicorn app.gateway.app:app --host 127.0.0.1 --port 8001 *>> '$glog'"
+  Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile','-Command', $cmd
   [void](Wait-Port 8001 90 'Gateway')
 }
 
@@ -48,13 +53,13 @@ if (Test-Port 4173) { Write-Host '  Console server is already up.' -ForegroundCo
 else {
   Write-Host '  Serving the console on http://localhost:4173 ...'
   $py = (Get-Command py -ErrorAction SilentlyContinue).Source
-  if ($py) { Start-Process py -ArgumentList '-m','http.server','4173' -WorkingDirectory $root -WindowStyle Minimized }
-  else     { Start-Process python -ArgumentList '-m','http.server','4173' -WorkingDirectory $root -WindowStyle Minimized }
+  if ($py) { Start-Process py -ArgumentList '-m','http.server','4173' -WorkingDirectory $root -WindowStyle Hidden }
+  else     { Start-Process python -ArgumentList '-m','http.server','4173' -WorkingDirectory $root -WindowStyle Hidden }
   [void](Wait-Port 4173 15 'Console server')
 }
 
 # 4. Open it, live
 Start-Process 'http://localhost:4173/deer-blind.html#gw=http://localhost:8001&mode=live'
 Write-Host ''
-Write-Host '  The blind is open. Good hunting.' -ForegroundColor DarkYellow
+Write-Host '  The blind is open. Good hunting. (stop-deer-blind.cmd closes camp)' -ForegroundColor DarkYellow
 Start-Sleep 3
