@@ -4,13 +4,13 @@ A field console for [DeerFlow 2.0](https://github.com/bytedance/deer-flow) — b
 
 ## Just want to open it?
 
-`deer-blind.html` is the whole console in one file — it is the committed build output. Double-click it for mock mode (a scripted demo world), or serve it next to a running gateway and go live:
+`deer-blind.html` is the whole console in one file — it is the committed build output. Double-click it for mock mode (a scripted demo world), or go live with one click:
 
 ```
 start-deer-blind.cmd
 ```
 
-That serves this folder on http://localhost:4173 and opens the console pointed at a gateway on http://localhost:8001. Mode, gateway URL, and model all live in the URL hash (`#gw=http://localhost:8001&mode=live`) — nothing is stored in the browser.
+That starts the whole stack: Ollama (if it isn't already running), the DeerFlow gateway in its own log window, and a local server for this folder on http://localhost:4173 — then it opens the console live. Mode, gateway URL, and model all live in the URL hash (`#gw=http://localhost:8001&mode=live`) — nothing is stored in the browser.
 
 ## The real project
 
@@ -44,7 +44,7 @@ src/styles/fonts.css  @fontsource imports, inlined as base64 by the build
 
 The adapter speaks the gateway's native surface, verified against the deer-flow backend source: `POST /api/threads`, `POST /api/threads/{id}/runs/stream` (SSE), cancel / reattach / events / workspace-changes, plus `/api/models`, `/api/skills`, `/api/memory`, and `/api/mcp/config`. Details that cost real debugging: the run id arrives in the SSE `metadata` event (the `Content-Location` header is invisible cross-origin), a busy thread reports status `running` (the docs say `busy`), and qwen-style `<think>` blocks are folded into a REASONING disclosure instead of leaking into the reply.
 
-Start the gateway (Windows, no Docker — local sandbox + Ollama):
+The launcher starts the gateway for you. To run it by hand (Windows, no Docker — local sandbox + Ollama):
 
 ```powershell
 cd D:\Dev\GitHub\deer-flow\backend
