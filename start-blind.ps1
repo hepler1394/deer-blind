@@ -1,6 +1,7 @@
 # start-blind.ps1 - one click: Ollama + DeerFlow gateway + the console, live.
 # Everything runs hidden in the background; the gateway logs to deer-flow-gateway.log.
 # stop-deer-blind.cmd shuts it all down again (Ollama is left alone).
+param([switch]$NoOpen)
 $ErrorActionPreference = 'SilentlyContinue'
 Remove-Item Env:VIRTUAL_ENV -ErrorAction SilentlyContinue   # scrub inherited venvs (silences a uv warning)
 $root     = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -8,16 +9,25 @@ $deerflow = 'D:\Dev\GitHub\deer-flow'
 $uv       = 'C:\Users\Cory\.local\bin\uv.exe'
 if (-not (Test-Path $uv)) { $uv = 'uv' }
 
-# OpenRouter key (optional). deer-flow's config.yaml lists two OpenRouter models
-# whose api_key is $OPENROUTER_API_KEY - without SOME value the gateway refuses
-# to boot at all. Real key: paste it into a file named openrouter.key next to
-# this script (gitignored). Without one, the local Ollama models work fine and
-# the OpenRouter models just fail politely if picked.
-$orFile = Join-Path $root 'openrouter.key'
-if (-not $env:OPENROUTER_API_KEY -and (Test-Path $orFile)) {
-  $env:OPENROUTER_API_KEY = (Get-Content $orFile -Raw).Trim()
+# OpenRouter key. deer-flow's config.yaml lists two OpenRouter models whose
+# api_key is $OPENROUTER_API_KEY - without SOME value the gateway refuses to
+# boot. Resolution order: already-set env var, deer-flow\.env, openrouter.key
+# next to this script. The key never leaves this machine.
+$orKey = $env:OPENROUTER_API_KEY
+if (-not $orKey) {
+  $envFile = Join-Path $deerflow '.env'
+  if (Test-Path $envFile) {
+    $line = Select-String -Path $envFile -Pattern '^\s*OPENROUTER_API_KEY\s*=' | Select-Object -First 1
+    if ($line) { $orKey = ($line.Line -split '=', 2)[1].Trim().Trim('"') }
+  }
 }
-if (-not $env:OPENROUTER_API_KEY) { $env:OPENROUTER_API_KEY = 'not-set' }
+if (-not $orKey) {
+  $orFile = Join-Path $root 'openrouter.key'
+  if (Test-Path $orFile) { $orKey = (Get-Content $orFile -Raw).Trim() }
+}
+if ($orKey) { Write-Host "  OpenRouter key: loaded ($($orKey.Length) chars)." -ForegroundColor Green }
+else { $orKey = 'not-set'; Write-Host '  No OpenRouter key found - local models only.' -ForegroundColor Yellow }
+$env:OPENROUTER_API_KEY = $orKey
 
 function Test-Port([int]$p){
   $c = New-Object Net.Sockets.TcpClient
@@ -69,7 +79,7 @@ else {
 }
 
 # 4. Open it, live
-Start-Process 'http://localhost:4173/deer-blind.html#gw=http://localhost:8001&mode=live'
+if (-not $NoOpen) { Start-Process 'http://localhost:4173/deer-blind.html#gw=http://localhost:8001&mode=live' }
 Write-Host ''
 Write-Host '  The blind is open. Good hunting. (stop-deer-blind.cmd closes camp)' -ForegroundColor DarkYellow
 Start-Sleep 3
