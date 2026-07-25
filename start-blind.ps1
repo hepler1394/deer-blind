@@ -8,6 +8,17 @@ $deerflow = 'D:\Dev\GitHub\deer-flow'
 $uv       = 'C:\Users\Cory\.local\bin\uv.exe'
 if (-not (Test-Path $uv)) { $uv = 'uv' }
 
+# OpenRouter key (optional). deer-flow's config.yaml lists two OpenRouter models
+# whose api_key is $OPENROUTER_API_KEY - without SOME value the gateway refuses
+# to boot at all. Real key: paste it into a file named openrouter.key next to
+# this script (gitignored). Without one, the local Ollama models work fine and
+# the OpenRouter models just fail politely if picked.
+$orFile = Join-Path $root 'openrouter.key'
+if (-not $env:OPENROUTER_API_KEY -and (Test-Path $orFile)) {
+  $env:OPENROUTER_API_KEY = (Get-Content $orFile -Raw).Trim()
+}
+if (-not $env:OPENROUTER_API_KEY) { $env:OPENROUTER_API_KEY = 'not-set' }
+
 function Test-Port([int]$p){
   $c = New-Object Net.Sockets.TcpClient
   try { $c.Connect('127.0.0.1', $p); $true } catch { $false } finally { $c.Close() }
@@ -33,13 +44,12 @@ else {
   [void](Wait-Port 11434 20 'Ollama')
 }
 
-# 2. The DeerFlow gateway
+# 2. The DeerFlow gateway (inherits the env set above)
 if (Test-Port 8001) { Write-Host '  Gateway is already up.' -ForegroundColor Green }
 else {
   Write-Host '  Starting the DeerFlow gateway (log: deer-flow-gateway.log)...'
   $glog = Join-Path $root 'deer-flow-gateway.log'
-  $cmd = "Remove-Item Env:VIRTUAL_ENV -ErrorAction SilentlyContinue; " +
-         "cd '$deerflow\backend'; " +
+  $cmd = "cd '$deerflow\backend'; " +
          "`$env:DEER_FLOW_AUTH_DISABLED='1'; " +
          "`$env:GATEWAY_CORS_ORIGINS='http://localhost:4173'; " +
          "`$env:PYTHONPATH='.'; " +
