@@ -383,7 +383,7 @@ function renderStation(){
 }
 function srcNote(){
   return S.mode==='live' && S.liveOk
-    ? `<span class="tag" style="color:var(--series);border-color:rgba(111,176,94,.4)">FROM GATEWAY</span>`
+    ? `<span class="tag" style="color:var(--series);border-color:rgba(57,135,229,.4)">FROM GATEWAY</span>`
     : `<span class="tag">MOCK DATA</span>`;
 }
 function renderModelsTab(){
@@ -394,7 +394,7 @@ function renderModelsTab(){
         <div class="listrow">
           <div class="lr-body">
             <div class="lr-t">${esc(m.display_name||m.name)}
-              ${m.name===S.composerModel?'<span class="tag" style="color:var(--series);border-color:rgba(111,176,94,.4)">DEFAULT</span>':''}</div>
+              ${m.name===S.composerModel?'<span class="tag" style="color:var(--series);border-color:rgba(57,135,229,.4)">DEFAULT</span>':''}</div>
             <div class="lr-d">provider: ${esc(m.provider||'—')}${m.ctx?` · context ${fmtTok(m.ctx)}`:''}</div>
           </div>
           <span class="lr-mono">${esc(m.name)}</span>
