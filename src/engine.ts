@@ -273,7 +273,7 @@ function fieldReport(run){
 }
 function pushEvent(run, agent, kind, msg){
   run.events.push(ev(Date.now(), agent, kind, msg));
-  if (kind==='tool') run.toolCalls++;
+  if (kind==='tool' && !/^[^ ]+: /.test(msg)) run.toolCalls++; /* results ('name: …') don't double-count their call */
 }
 
 

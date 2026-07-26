@@ -153,10 +153,16 @@ const Live = {
           if (typeof c==='string') text = c;
           else if (Array.isArray(c)) text = c.map(p=>p?.text||'').join('');
           if (/tool/i.test(t)){
+            /* tool output is telemetry, not reply text — never accumulate it */
             pushEvent(run, agentRow.name, 'tool', (chunk.name?chunk.name+': ':'')+String(text).slice(0,160));
+            continue;
           } else if (chunk?.tool_calls?.length || chunk?.tool_call_chunks?.length){
             const tc = (chunk.tool_calls||chunk.tool_call_chunks||[])[0]||{};
             if (tc.name) pushEvent(run, agentRow.name, 'tool', 'call '+tc.name+'(…)');
+            for (const call of (chunk.tool_calls||[])){
+              if (call.name==='present_files' && call.args && Array.isArray(call.args.filepaths))
+                (run._presented = run._presented || []).push(...call.args.filepaths);
+            }
           }
           if (text){
             acc += text; bump(Math.ceil(text.length/4));
@@ -191,7 +197,7 @@ const Live = {
         run.agents = [mkAgent('gateway','lead','gateway run '+String(rid).slice(0,8), run.status, 0, 0, 0)];
         S.runs[run.id] = run; t.runIds.push(run.id);
         if (run.status==='run') this.attach(t, run);
-        else { this.loadRunEvents(t, run); this.pullArtifacts(t, run); }
+        else { this.loadRunEvents(t, run).then(()=>this.pullPresented(t, run)); this.pullArtifacts(t, run); }
       }
       try { const tu = await this.req(`/api/threads/${t.remoteId}/token-usage`);
         const last = S.runs[t.runIds[t.runIds.length-1]];
@@ -217,6 +223,11 @@ const Live = {
         if (typeof c==='string' && c && !/^<object/.test(c)) msg = et+': '+stripThink(c).text.slice(0,140);
         else if (c && typeof c==='object' && typeof c.content==='string') msg = et+': '+stripThink(c.content).text.slice(0,140);
         else if (e.name) msg = et+': '+e.name;
+        const tcs = (c && typeof c==='object' && Array.isArray(c.tool_calls)) ? c.tool_calls : [];
+        for (const call of tcs){
+          if (call.name==='present_files' && call.args && Array.isArray(call.args.filepaths))
+            (run._presented = run._presented || []).push(...call.args.filepaths);
+        }
         run.events.push({ ts: e.created_at ? +new Date(e.created_at) : run.startedAt,
           agent: e.task_id ? String(e.task_id).slice(0,8) : 'gateway', kind, msg });
       }
@@ -244,6 +255,28 @@ const Live = {
       }
       if (files.length){ toast('Artifacts', files.length+' file'+(files.length===1?'':'s')+' pulled from the gateway'); renderNavCounts(); renderIfActive('arts'); }
     } catch(e){ note('workspace-changes', e); }
+  },
+  async pullPresented(t, run){
+    /* artifacts announced via the present_files tool — the only artifact channel
+       on LocalSandboxProvider, where workspace snapshots report available:false */
+    const paths = [...new Set<string>(run._presented || [])];
+    if (!paths.length || run._presPulled) return; run._presPulled = true;
+    let pulled = 0;
+    for (const p of paths.slice(0, 30)){
+      const name = p.split('/').pop();
+      const ext = (name.split('.').pop()||'').toLowerCase();
+      const type = ext==='md'?'md':ext==='html'?'html':'json';
+      try {
+        const raw = await this.req(`/api/threads/${t.remoteId}/artifacts${encodeURI(p)}`);
+        const body = typeof raw==='string' ? raw : JSON.stringify(raw, null, 2);
+        run.artifacts.push({...art(name, type, body, t.id), gwPath: p});
+        pushEvent(run, 'gateway', 'info', 'presented: '+p); pulled++;
+      } catch(_){
+        pushEvent(run, 'gateway', 'warn', 'agent presented a file the gateway cannot find: '+p);
+      }
+    }
+    if (pulled){ toast('Artifacts', pulled+' presented file'+(pulled===1?'':'s')+' pulled'); }
+    renderNavCounts(); renderIfActive('arts'); renderIfActive('tele');
   },
   async attach(t, run){
     /* resume watching an in-flight gateway run (survives tab reloads) */
@@ -343,6 +376,7 @@ const Live = {
           pushEvent(run,'gateway','info',`token usage (gateway): ${fmtNum(tu.total_tokens)} total · ${fmtNum(tu.total_input_tokens)} in / ${fmtNum(tu.total_output_tokens)} out · ${tu.total_runs} runs`); }
       } catch(e){ note('token-usage', e); }
       await this.pullArtifacts(thread, run);
+      await this.pullPresented(thread, run);
       const fin = stripThink(acc);
       thread.messages.push({who:'atlas', ts:Date.now(), dur: (run.endedAt||Date.now())-run.startedAt, think: fin.think || undefined, body: fin.text || 'Run finished — the stream carried no assistant text this console recognized. The raw event log is on the gateway: GET /api/threads/'+thread.remoteId+'/runs/'+(run.remoteRunId||'…')+'/events.'});
     } catch(e){
