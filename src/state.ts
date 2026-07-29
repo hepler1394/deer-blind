@@ -12,6 +12,7 @@ const S: any = {
   feedFilter: 'all',
   feedQuery: '',
   selArtifact: null,
+  pendingFiles: [],
   totalTokens: 0,
   models: [], skills: [], memory: null, mcp: null,
   composerModel: null, composerSkills: new Set(['deep-research']),

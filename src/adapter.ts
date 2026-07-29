@@ -312,7 +312,11 @@ const Live = {
       const fd = new FormData(); fd.append('files', file);
       const up = await this.req(`/api/threads/${tid}/uploads`, {method:'POST', body: fd});
       const f0 = (up.files||up.uploaded||[])[0] || {};
-      const vpath = f0.path || f0.virtual_path || ('mnt/user-data/uploads/'+file.name);
+      /* the install endpoint resolves this through resolve_thread_virtual_path(),
+         which requires the /mnt/user-data/... sandbox path — NOT f0.path, which is
+         the real host filesystem path and gets rejected with 400 "must start with
+         /mnt/user-data" every time. virtual_path is the one that actually works. */
+      const vpath = f0.virtual_path || f0.path || ('/mnt/user-data/uploads/'+file.name);
       await this.req('/api/skills/install', {method:'POST', body: JSON.stringify({thread_id: tid, path: vpath})});
       toast('Skill rack', file.name+' installed on gateway'); this.hydrate();
     } catch(e){ toast('Install failed', e.message, true); }

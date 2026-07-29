@@ -238,6 +238,7 @@ select.input{appearance:none;padding-right:26px;
 .composer-box{background:var(--surface-2);border:1px solid var(--border-hair);border-radius:8px;
   transition:border-color .12s}
 .composer-box:focus-within{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.composer-box.dragover{border-color:var(--accent);border-style:dashed;background:var(--accent-wash)}
 .composer textarea{width:100%;background:none;border:none;resize:none;padding:12px 14px 4px;
   min-height:52px;max-height:180px;font-size:13.5px;line-height:1.5}
 .composer textarea:focus{outline:none}

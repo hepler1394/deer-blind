@@ -162,6 +162,22 @@ function renderPending(){
      <button class="iconbtn" data-unfile="${i}" style="width:16px;height:16px" aria-label="Remove ${esc(f.name)}">×</button></span>`).join('');
   $$('[data-unfile]', box).forEach(b=>b.addEventListener('click',()=>{ S.pendingFiles.splice(+b.dataset.unfile,1); renderPending(); }));
 }
+/* soft client-side cap matching the gateway's uploads.max_files default (10) —
+   advisory only, so a differently-configured gateway still enforces the real
+   limit itself and dispatch()'s catch surfaces that error if this guess is wrong */
+const SOFT_MAX_PENDING_FILES = 10;
+function addPendingFiles(fileList: FileList | File[] | null | undefined){
+  const incoming = Array.from(fileList || []).filter(f=>f && typeof f.size==='number');
+  if (!incoming.length) return;
+  const cur = S.pendingFiles || (S.pendingFiles = []);
+  const room = SOFT_MAX_PENDING_FILES - cur.length;
+  if (room <= 0){ toast('Too many files', `${SOFT_MAX_PENDING_FILES} already staged — dispatch this brief or remove one first`, true); return; }
+  const accepted = incoming.slice(0, room);
+  cur.push(...accepted);
+  renderPending();
+  if (incoming.length > accepted.length)
+    toast('Some files skipped', `staged ${accepted.length} of ${incoming.length} — over the ${SOFT_MAX_PENDING_FILES}-file limit`, true);
+}
 function dispatch(){
   const ta = $('#composer-input');
   const brief = ta.value.trim();
@@ -491,4 +507,4 @@ function renderMcpTab(){
 }
 
 
-export { setView, renderIfActive, renderView, renderAll, statusChip, renderNavCounts, renderTop, renderStrip, renderOps, renderChat, renderComposer, deleteThread, renderPending, dispatch, renderTele, renderFeedLines, allArtifacts, renderArts, fileIcon, antlerSVG, renderStation };
+export { setView, renderIfActive, renderView, renderAll, statusChip, renderNavCounts, renderTop, renderStrip, renderOps, renderChat, renderComposer, deleteThread, renderPending, addPendingFiles, dispatch, renderTele, renderFeedLines, allArtifacts, renderArts, fileIcon, antlerSVG, renderStation };

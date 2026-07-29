@@ -7,7 +7,7 @@ import { MOCK_MODELS, MOCK_SKILLS, MOCK_MEMORY, MOCK_MCP } from './mockdata';
 import { seedMockWorld } from './engine';
 import { Live } from './adapter';
 import { wireHub, toast } from './hub';
-import { setView, dispatch, renderOps, renderPending, renderAll, renderTop, renderStrip, renderIfActive, renderNavCounts, renderChat } from './render';
+import { setView, dispatch, renderOps, renderPending, addPendingFiles, renderAll, renderTop, renderStrip, renderIfActive, renderNavCounts, renderChat } from './render';
 import { testConnection, checkRelease } from './adapter';
 /* =========================================================================
    toasts, clock, boot
@@ -40,8 +40,20 @@ function boot(){
   $('#btn-new-thread').addEventListener('click',()=>{ S.activeThreadId=null; renderOps(); $('#composer-input').focus(); });
   $('#btn-attach').addEventListener('click',()=>{
     const inp=document.createElement('input'); inp.type='file'; inp.multiple=true;
-    inp.onchange=()=>{ S.pendingFiles=(S.pendingFiles||[]).concat([...inp.files]); renderPending(); };
+    inp.onchange=()=>{ addPendingFiles(inp.files); };
     inp.click();
+  });
+
+  /* drag-and-drop straight onto the composer — same destination as the attach button */
+  const dropZone: any = $('.composer-box');
+  const hasFiles = (e: any) => !!e.dataTransfer && Array.from(e.dataTransfer.types||[]).includes('Files');
+  dropZone.addEventListener('dragover', (e: any)=>{ if (!hasFiles(e)) return; e.preventDefault(); dropZone.classList.add('dragover'); });
+  dropZone.addEventListener('dragleave', (e: any)=>{ if (dropZone.contains(e.relatedTarget)) return; dropZone.classList.remove('dragover'); });
+  dropZone.addEventListener('drop', (e: any)=>{
+    dropZone.classList.remove('dragover');
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    addPendingFiles(e.dataTransfer.files);
   });
 
   /* station bindings */
