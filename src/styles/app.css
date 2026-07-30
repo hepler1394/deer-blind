@@ -145,6 +145,11 @@ code,kbd{font-family:var(--f-mono)}
 select.input{appearance:none;padding-right:26px;
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%237C8894' stroke-width='1.5'/%3E%3C/svg%3E");
   background-repeat:no-repeat;background-position:right 10px center}
+/* the dropdown *popup* is a native/OS-painted layer — color-scheme:dark alone
+   doesn't reliably theme it on every browser, so it can fall back to a white
+   list with dim text, unreadable until an option is hovered. Pin it by hand. */
+select.input option{background:var(--surface-2);color:var(--ink);padding:6px 8px}
+select.input option:checked,select.input option:hover{background:var(--surface-3);color:var(--accent)}
 
 .tag{display:inline-flex;align-items:center;gap:5px;font:600 10.5px/1 var(--f-mono);
   letter-spacing:.06em;padding:3px 7px;border-radius:var(--r-tag);
