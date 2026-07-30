@@ -1,6 +1,6 @@
 // render.ts — every view renderer + dispatch
 import { S } from './state';
-import { $, $$, esc, fmtTok, fmtNum, fmtBytes, fmtT, fmtAgo, fmtDur, md, stripThink } from './utils';
+import { $, $$, esc, fmtTok, fmtNum, fmtBytes, fmtT, fmtAgo, fmtDur, md, stripThink, makeZip } from './utils';
 import { MOCK_MODELS, MOCK_SKILLS, MOCK_MEMORY, MOCK_MCP } from './mockdata';
 import { nid, pushEvent, startMockRun, stopRun, fieldReport } from './engine';
 import { sparkSVG, tokChartSVG, wireTokChart } from './charts';
@@ -69,7 +69,13 @@ function renderOps(){
     const ordered = (S.mode==='live' && S.liveOk)
       ? [...S.threads].sort((a,b)=>((a.demo?1:0)-(b.demo?1:0)) || (b.createdAt-a.createdAt))
       : S.threads;
-    list.innerHTML = ordered.map(t=>{
+    const q = (S.threadQuery||'').trim().toLowerCase();
+    const shown = q ? ordered.filter(t=>t.title.toLowerCase().includes(q)) : ordered;
+    if (!shown.length){
+      list.innerHTML = `<div style="padding:var(--s4) var(--s3);color:var(--ink-3);font-size:12px">nothing matches “${esc(S.threadQuery)}”</div>`;
+      renderChat(); renderComposer(); return;
+    }
+    list.innerHTML = shown.map(t=>{
       const latest = S.runs[t.runIds[t.runIds.length-1]];
       return `<button class="thread-card ${t.id===S.activeThreadId?'sel':''}" data-th="${t.id}">
         <span class="tc-title">${esc(t.title)}</span>
@@ -229,6 +235,11 @@ function renderTele(){
   }
   const t = S.threads.find(x=>x.id===run.threadId);
   const dur = (run.endedAt||Date.now()) - run.startedAt;
+  /* only follow the feed if the user was already at (or near) the bottom —
+     re-renders during a live stream shouldn't yank them away from a line
+     they scrolled up to read */
+  const prevFs = $('#feed-scroll');
+  const stick = !prevFs || (prevFs.scrollHeight - prevFs.scrollTop - prevFs.clientHeight < 48);
   const allRuns = Object.values<any>(S.runs)
     .filter(r=>r.id!==run.id)
     .sort((a,b)=>b.startedAt-a.startedAt)
@@ -273,6 +284,7 @@ function renderTele(){
           ${['all','tool','info','warn','err'].map(k=>`<button class="f-chip" data-f="${k}" aria-pressed="${S.feedFilter===k}">${k}</button>`).join('')}
           <input class="input" id="feed-q" placeholder="grep the wire…" value="${esc(S.feedQuery)}" aria-label="Filter feed text"
             style="width:130px;padding:3px 8px;font:400 11px var(--f-mono)">
+          <button class="f-chip" id="btn-feed-export" title="Download this run's full feed as text">export</button>
         </div>
       </div>
       <div class="feed-scroll" id="feed-scroll">${renderFeedLines(run)}</div>
@@ -287,7 +299,14 @@ function renderTele(){
   $$('.f-chip', main).forEach(c=>c.addEventListener('click',()=>{ S.feedFilter=c.dataset.f; renderTele(); }));
   const fq = $('#feed-q'); if (fq) fq.addEventListener('input', ()=>{ S.feedQuery = fq.value; const fsEl=$('#feed-scroll'); if (fsEl) fsEl.innerHTML = renderFeedLines(run); });
   const rep = $('#btn-field-report'); if (rep) rep.addEventListener('click', ()=>fieldReport(run));
-  const fs = $('#feed-scroll'); fs.scrollTop = fs.scrollHeight;
+  const fx = $('#btn-feed-export'); if (fx) fx.addEventListener('click', ()=>{
+    const txt = run.events.map(e=>`${fmtT(e.ts)}  ${String(e.agent).padEnd(10)} ${String(e.kind).padEnd(5)} ${e.msg}`).join('\n');
+    const u = URL.createObjectURL(new Blob([txt], {type:'text/plain'}));
+    const link = document.createElement('a'); link.href=u; link.download=`${run.remoteRunId||run.id}-feed.txt`; link.click();
+    setTimeout(()=>URL.revokeObjectURL(u), 5000);
+    toast('Feed', run.events.length+' lines exported');
+  });
+  const fs = $('#feed-scroll'); if (stick) fs.scrollTop = fs.scrollHeight;
 
   /* side instruments */
   const spark = run.tokSeries.slice(-12);
@@ -342,17 +361,46 @@ function allArtifacts(){
   }
   return out;
 }
+function artsFiltered(){
+  const q = (S.artQuery||'').trim().toLowerCase();
+  return allArtifacts()
+    .map(g=>({thread:g.thread, arts: q ? g.arts.filter(a=>(a.name+' '+g.thread.title).toLowerCase().includes(q)) : g.arts}))
+    .filter(g=>g.arts.length);
+}
+function zipAllArtifacts(){
+  const groups = artsFiltered();
+  const files = []; const used = new Set();
+  for (const g of groups){
+    const dir = (g.thread.title||'thread').replace(/[^\w\- ]+/g,'').trim().replace(/\s+/g,'-').slice(0,40) || 'thread';
+    for (const a of g.arts){
+      let n = `${dir}/${a.name}`, i = 2;
+      while (used.has(n)){ n = `${dir}/${i}-${a.name}`; i++; }
+      used.add(n); files.push({name:n, data:a.body});
+    }
+  }
+  if (!files.length){ toast('Artifacts','nothing to zip on this filter', true); return; }
+  const u = URL.createObjectURL(makeZip(files));
+  const link = document.createElement('a'); link.href=u; link.download='deer-blind-artifacts.zip'; link.click();
+  setTimeout(()=>URL.revokeObjectURL(u), 5000);
+  toast('Artifacts', files.length+' file'+(files.length===1?'':'s')+' zipped — the whole tray in one bag');
+}
 function renderArts(){
   const listEl = $('#arts-list'), viewEl = $('#arts-view');
-  const groups = allArtifacts();
-  if (!groups.length){
+  if (!allArtifacts().length){
     listEl.innerHTML='';
     viewEl.innerHTML = `<div class="empty" style="height:100%">${antlerSVG(44)}
       <div class="e-title">The tray is empty</div>
       <div class="e-sub">Artifacts land here as runs write them — reports, charts, source trails, whole little sites. Dispatch something and check back.</div></div>`;
     return;
   }
+  const groups = artsFiltered();
   const flat = groups.flatMap(g=>g.arts);
+  if (!flat.length){
+    listEl.innerHTML = `<div style="padding:var(--s4) var(--s3);color:var(--ink-3);font-size:12px">nothing matches “${esc(S.artQuery)}”</div>`;
+    viewEl.innerHTML = `<div class="empty" style="height:100%">${antlerSVG(34)}
+      <div class="e-title">No matches</div><div class="e-sub">Clear the filter to see the whole tray again.</div></div>`;
+    return;
+  }
   if (!S.selArtifact || !flat.find(a=>a.id===S.selArtifact)) S.selArtifact = flat[0].id;
   listEl.innerHTML = groups.map(g=>`
     <div class="arts-group">
@@ -365,16 +413,31 @@ function renderArts(){
   $$('.art-row', listEl).forEach(b=>b.addEventListener('click',()=>{ S.selArtifact=b.dataset.art; renderArts(); }));
 
   const a = flat.find(x=>x.id===S.selArtifact);
-  const dl = `<button class="btn sm" id="btn-dl-art">Download</button>`;
+  const isHtml = a.type==='html';
+  const viewChips = isHtml ? `
+    <button class="f-chip" data-av="preview" aria-pressed="${S.artView!=='source'}">preview</button>
+    <button class="f-chip" data-av="source" aria-pressed="${S.artView==='source'}">source</button>` : '';
+  const openTab = isHtml ? `<button class="btn sm" id="btn-tab-art" title="Open unsandboxed in a new tab">Open in tab</button>` : '';
   const liveLink = S.mode==='live' && S.liveOk
     ? `<a class="btn sm" style="text-decoration:none" href="${S.gatewayUrl}/api/threads/${a.threadId}/artifacts/${encodeURIComponent(a.name)}" target="_blank" rel="noopener">Open on gateway</a>` : '';
   let bodyHtml;
   if (a.type==='md') bodyHtml = `<div class="arts-body pad"><div class="md-doc">${md(a.body)}</div></div>`;
-  else if (a.type==='html') bodyHtml = `<div class="arts-body"><iframe sandbox="" title="${esc(a.name)} preview" srcdoc="${esc(a.body)}"></iframe></div>`;
+  else if (isHtml && S.artView!=='source') bodyHtml = `<div class="arts-body"><iframe sandbox="" title="${esc(a.name)} preview" srcdoc="${esc(a.body)}"></iframe></div>`;
   else bodyHtml = `<div class="arts-body"><div class="code-doc">${esc(a.body)}</div></div>`;
   viewEl.innerHTML = `
     <div class="arts-view-h">${fileIcon(a.type)}<span class="av-name">${esc(a.name)}</span>
-      <span class="tag">${a.type.toUpperCase()}</span>${liveLink}${dl}</div>${bodyHtml}`;
+      <span class="tag">${a.type.toUpperCase()}</span>${viewChips}${liveLink}${openTab}
+      <button class="btn sm" id="btn-copy-art">Copy</button>
+      <button class="btn sm" id="btn-dl-art">Download</button></div>${bodyHtml}`;
+  $$('[data-av]', viewEl).forEach(c=>c.addEventListener('click',()=>{ S.artView=c.dataset.av; renderArts(); }));
+  const tab = $('#btn-tab-art'); if (tab) tab.addEventListener('click',()=>{
+    const u = URL.createObjectURL(new Blob([a.body], {type:'text/html'}));
+    window.open(u, '_blank'); setTimeout(()=>URL.revokeObjectURL(u), 10000);
+  });
+  $('#btn-copy-art').addEventListener('click',()=>{
+    navigator.clipboard.writeText(a.body).then(()=>toast('Copied', a.name+' on the clipboard'))
+      .catch(()=>toast('Copy failed','clipboard is blocked in this context', true));
+  });
   $('#btn-dl-art').addEventListener('click',()=>{
     const blob = new Blob([a.body], {type: a.type==='html'?'text/html':a.type==='json'?'application/json':'text/markdown'});
     const u = URL.createObjectURL(blob); const link = document.createElement('a');
@@ -440,9 +503,13 @@ function renderSkillsTab(){
           </label>
         </div>`).join('')}
     </div>
-    <div style="display:flex;gap:10px;align-items:center;margin-top:var(--s4)">
-      <button class="btn" id="btn-install-skill">Install from .skill archive</button>
-      <span style="font-size:11.5px;color:var(--ink-3)">POST /api/skills/install — zip of SKILL.md + resources</span>
+    <div style="display:flex;gap:10px;align-items:center;margin-top:var(--s4);flex-wrap:wrap">
+      ${S.installingSkill ? `
+        <button class="btn" id="btn-install-skill" disabled><span class="cursor-blink" style="width:5px;height:11px"></span>&nbsp;Scanning ${esc(S.installingSkill)}…</button>
+        <span style="font-size:11.5px;color:var(--ink-3)">the gateway is LLM-scanning the archive for anything hostile — on a local model this can take a few minutes. Safe to browse elsewhere; a toast lands either way.</span>`
+      : `
+        <button class="btn" id="btn-install-skill">Install from .skill archive</button>
+        <span style="font-size:11.5px;color:var(--ink-3)">POST /api/skills/install — zip of SKILL.md + resources</span>`}
     </div>`;
   $$('[data-skill-toggle]').forEach(sw=>sw.addEventListener('change',()=>{
     const s = S.skills.find(x=>x.id===sw.dataset.skillToggle); if (!s) return;
@@ -450,7 +517,7 @@ function renderSkillsTab(){
     if (S.mode==='live' && S.liveOk) Live.putSkill(s);
     toast('Skill rack', `${s.name} ${s.enabled?'enabled':'disabled'}${S.mode==='mock'?' (mock)':''}`);
   }));
-  $('#btn-install-skill').addEventListener('click',()=>{
+  if (!S.installingSkill) $('#btn-install-skill').addEventListener('click',()=>{
     const inp=document.createElement('input'); inp.type='file'; inp.accept='.skill,.zip';
     inp.onchange=()=>{ const f=inp.files[0]; if(!f) return;
       if (S.mode==='live'&&S.liveOk) Live.installSkill(f);
@@ -507,4 +574,4 @@ function renderMcpTab(){
 }
 
 
-export { setView, renderIfActive, renderView, renderAll, statusChip, renderNavCounts, renderTop, renderStrip, renderOps, renderChat, renderComposer, deleteThread, renderPending, addPendingFiles, dispatch, renderTele, renderFeedLines, allArtifacts, renderArts, fileIcon, antlerSVG, renderStation };
+export { setView, renderIfActive, renderView, renderAll, statusChip, renderNavCounts, renderTop, renderStrip, renderOps, renderChat, renderComposer, deleteThread, renderPending, addPendingFiles, dispatch, renderTele, renderFeedLines, allArtifacts, renderArts, zipAllArtifacts, fileIcon, antlerSVG, renderStation };

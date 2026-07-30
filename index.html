@@ -69,6 +69,9 @@
             <h2>Operations</h2>
             <button class="btn sm" id="btn-new-thread">New</button>
           </div>
+          <div class="ops-search">
+            <input class="input" id="thread-q" placeholder="filter operations…" aria-label="Filter operations" spellcheck="false">
+          </div>
           <div class="ops-scroll" id="thread-list"></div>
         </div>
         <div class="ops-chat">
@@ -88,7 +91,7 @@
               </div>
               <div id="pending-files" style="display:none;padding:0 12px 10px;gap:6px;flex-wrap:wrap"></div>
             </div>
-            <div class="composer-hint"><span class="kbd">Enter</span> dispatch &nbsp;·&nbsp; <span class="kbd">Shift+Enter</span> newline &nbsp;·&nbsp; sub-agents fan out automatically on multi-part briefs</div>
+            <div class="composer-hint"><span class="kbd">Enter</span> dispatch &nbsp;·&nbsp; <span class="kbd">Shift+Enter</span> newline &nbsp;·&nbsp; drop or paste files anywhere on the box</div>
           </div>
         </div>
       </div>
@@ -105,7 +108,13 @@
     <!-- ARTIFACTS -->
     <section class="view" id="view-arts" aria-label="Artifacts">
       <div class="arts">
-        <div class="arts-list" id="arts-list"></div>
+        <div class="arts-side">
+          <div class="arts-tools">
+            <input class="input" id="arts-q" placeholder="filter artifacts…" aria-label="Filter artifacts" spellcheck="false">
+            <button class="btn sm" id="btn-zip-arts" title="Download every artifact (respecting the filter) as one zip">Zip all</button>
+          </div>
+          <div class="arts-list" id="arts-list"></div>
+        </div>
         <div class="arts-view" id="arts-view"></div>
       </div>
     </section>
@@ -171,10 +180,10 @@
           <div class="tabpanel" id="tab-about" role="tabpanel">
             <div class="frow">
               <div class="fr-l"><label>Deer Blind</label>
-                <div class="fr-d">A single-file console. No build step, no dependencies, nothing phones home.</div></div>
+                <div class="fr-d">Builds to one self-contained HTML file — no runtime dependencies, nothing phones home.</div></div>
               <div class="fr-c">
                 <div style="font-size:12.5px;color:var(--ink-2);line-height:1.7">
-                  v0.1 · one HTML file · hand-rolled charts, markdown and mock engine.<br>
+                  v0.11 · TypeScript + Vite source, one-file output · hand-rolled charts, markdown, zip and mock engine.<br>
                   Named for the hut you watch deer from. You sit in the blind; the herd does the work.
                 </div>
               </div>
@@ -214,7 +223,7 @@ GET&nbsp;&nbsp;/api/memory · POST /api/memory/reload · GET/PUT /api/mcp/config
 
   <!-- ======= bottom instrument strip ======= -->
   <footer class="strip" aria-hidden="true">
-    <span>BLIND v0.10.1</span><span class="sep">|</span>
+    <span>BLIND v0.11.0</span><span class="sep">|</span>
     <span id="strip-mode">feed: mock</span><span class="sep">|</span>
     <span id="strip-run">no active run</span>
     <span class="spacer"></span>

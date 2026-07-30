@@ -7,7 +7,7 @@ import { MOCK_MODELS, MOCK_SKILLS, MOCK_MEMORY, MOCK_MCP } from './mockdata';
 import { seedMockWorld } from './engine';
 import { Live } from './adapter';
 import { wireHub, toast } from './hub';
-import { setView, dispatch, renderOps, renderPending, addPendingFiles, renderAll, renderTop, renderStrip, renderIfActive, renderNavCounts, renderChat } from './render';
+import { setView, dispatch, renderOps, renderPending, addPendingFiles, renderAll, renderTop, renderStrip, renderIfActive, renderNavCounts, renderChat, zipAllArtifacts } from './render';
 import { testConnection, checkRelease } from './adapter';
 /* =========================================================================
    toasts, clock, boot
@@ -34,8 +34,16 @@ function boot(){
 
   /* composer */
   $('#btn-dispatch').addEventListener('click', dispatch);
-  $('#composer-input').addEventListener('keydown', e=>{
+  const ta: any = $('#composer-input');
+  ta.addEventListener('keydown', (e: any)=>{
     if (e.key==='Enter' && !e.shiftKey){ e.preventDefault(); dispatch(); }});
+  /* paste a file (or a screenshot) straight into the brief — same tray as attach */
+  ta.addEventListener('paste', (e: any)=>{
+    const fs = e.clipboardData && e.clipboardData.files;
+    if (fs && fs.length){ e.preventDefault(); addPendingFiles(fs); }
+  });
+  /* grow with the brief, up to the CSS max */
+  ta.addEventListener('input', ()=>{ ta.style.height='auto'; ta.style.height=Math.min(ta.scrollHeight, 180)+'px'; });
   $('#composer-model').addEventListener('change', e=>{ S.composerModel=e.target.value; });
   $('#btn-new-thread').addEventListener('click',()=>{ S.activeThreadId=null; renderOps(); $('#composer-input').focus(); });
   $('#btn-attach').addEventListener('click',()=>{
@@ -55,6 +63,11 @@ function boot(){
     e.preventDefault();
     addPendingFiles(e.dataTransfer.files);
   });
+
+  /* operations + artifacts filters — static inputs, so typing never fights a re-render */
+  $('#thread-q').addEventListener('input', (e: any)=>{ S.threadQuery = e.target.value; renderIfActive('ops'); });
+  $('#arts-q').addEventListener('input', (e: any)=>{ S.artQuery = e.target.value; renderIfActive('arts'); });
+  $('#btn-zip-arts').addEventListener('click', zipAllArtifacts);
 
   /* station bindings */
   $('#btn-test-conn').addEventListener('click', testConnection);
@@ -82,17 +95,20 @@ function boot(){
   try {
     const h = new URLSearchParams(location.hash.slice(1));
     if (h.get('gw')){ S.gatewayUrl = h.get('gw').replace(/\/$/,''); $('#conn-url').value = S.gatewayUrl; }
+    if (h.get('model')) S.composerModel = h.get('model');
     if (h.get('mode')==='live'){ S.mode='live'; $('#conn-mode').value='live'; setTimeout(()=>testConnection(), 300); }
   } catch(_){}
   const syncHash = ()=>{ try {
     const h = new URLSearchParams();
     if (S.gatewayUrl !== 'http://localhost:2026') h.set('gw', S.gatewayUrl);
     if (S.mode === 'live') h.set('mode','live');
+    if (S.composerModel) h.set('model', S.composerModel);
     const s = h.toString();
     history.replaceState(null,'', s ? '#'+s : location.pathname + location.search);
   } catch(_){} };
   $('#conn-url').addEventListener('change', syncHash);
   $('#conn-mode').addEventListener('change', syncHash);
+  $('#composer-model').addEventListener('change', syncHash);
 
   /* clock + strip + live elapsed */
   setInterval(()=>{

@@ -58,6 +58,53 @@ function md(src){
   return out.join('\n').replace(/\x00B(\d+)\x00/g, (_,n)=>blocks[+n]);
 }
 
+/* zip, the store-only edition — enough to hand the artifact tray over as one
+   file without pulling in a dependency. No compression: these are small text
+   artifacts, and "opens everywhere" beats saving a few KB. */
+let _crcT: Uint32Array | null = null;
+function crc32(b: Uint8Array){
+  if (!_crcT){ _crcT = new Uint32Array(256);
+    for (let n=0;n<256;n++){ let c=n; for (let k=0;k<8;k++) c = c&1 ? 0xEDB88320 ^ (c>>>1) : c>>>1; _crcT[n]=c>>>0; } }
+  let c = 0xFFFFFFFF;
+  for (let i=0;i<b.length;i++) c = _crcT[(c ^ b[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+function makeZip(files: {name: string, data: string | Uint8Array}[]): Blob {
+  const enc = new TextEncoder();
+  /* any[]: TS 7's Uint8Array<ArrayBufferLike> vs BlobPart split fights plain
+     TextEncoder output; the runtime shapes here are trivially Blob-safe */
+  const parts: any[] = [], cen: any[] = [];
+  let off = 0;
+  const d = new Date();
+  const dosT = (d.getHours()<<11) | (d.getMinutes()<<5) | (d.getSeconds()>>1);
+  const dosD = (((d.getFullYear()-1980)&0x7F)<<9) | ((d.getMonth()+1)<<5) | d.getDate();
+  for (const f of files){
+    const name = enc.encode(f.name);
+    const data = typeof f.data === 'string' ? enc.encode(f.data) : f.data;
+    const crc = crc32(data);
+    const lh = new DataView(new ArrayBuffer(30));
+    lh.setUint32(0,0x04034b50,true); lh.setUint16(4,20,true); lh.setUint16(6,0x0800,true); lh.setUint16(8,0,true);
+    lh.setUint16(10,dosT,true); lh.setUint16(12,dosD,true); lh.setUint32(14,crc,true);
+    lh.setUint32(18,data.length,true); lh.setUint32(22,data.length,true);
+    lh.setUint16(26,name.length,true); lh.setUint16(28,0,true);
+    parts.push(lh.buffer, name, data);
+    const ch = new DataView(new ArrayBuffer(46));
+    ch.setUint32(0,0x02014b50,true); ch.setUint16(4,20,true); ch.setUint16(6,20,true); ch.setUint16(8,0x0800,true); ch.setUint16(10,0,true);
+    ch.setUint16(12,dosT,true); ch.setUint16(14,dosD,true); ch.setUint32(16,crc,true);
+    ch.setUint32(20,data.length,true); ch.setUint32(24,data.length,true);
+    ch.setUint16(28,name.length,true); ch.setUint16(30,0,true); ch.setUint16(32,0,true);
+    ch.setUint16(34,0,true); ch.setUint16(36,0,true); ch.setUint32(38,0,true); ch.setUint32(42,off,true);
+    cen.push(ch.buffer, name);
+    off += 30 + name.length + data.length;
+  }
+  let cenSize = 0; for (const c of cen) cenSize += (c as any).byteLength;
+  const eo = new DataView(new ArrayBuffer(22));
+  eo.setUint32(0,0x06054b50,true); eo.setUint16(4,0,true); eo.setUint16(6,0,true);
+  eo.setUint16(8,files.length,true); eo.setUint16(10,files.length,true);
+  eo.setUint32(12,cenSize,true); eo.setUint32(16,off,true); eo.setUint16(20,0,true);
+  return new Blob([...parts, ...cen, eo.buffer], {type:'application/zip'});
+}
+
 /* qwen-style reasoning: pull <think>…</think> out of a message */
 function stripThink(s){
   let think = '';
@@ -69,4 +116,4 @@ function stripThink(s){
 }
 
 
-export { $, $$, esc, fmtTok, fmtNum, fmtBytes, fmtClock, fmtT, fmtAgo, fmtDur, mulberry, debounce, md, stripThink };
+export { $, $$, esc, fmtTok, fmtNum, fmtBytes, fmtClock, fmtT, fmtAgo, fmtDur, mulberry, debounce, md, stripThink, crc32, makeZip };

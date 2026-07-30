@@ -305,7 +305,12 @@ const Live = {
   },
   async installSkill(file){
     /* real flow per source: upload the .skill into a thread, then
-       POST /api/skills/install {thread_id, path} */
+       POST /api/skills/install {thread_id, path}. The gateway LLM-scans the
+       archive before accepting it — minutes on a local model — so the whole
+       time is spent behind S.installingSkill and a visible pending state,
+       instead of the old silent nothing. */
+    if (S.installingSkill){ toast('Skill rack','an install is already in flight — one at a time', true); return; }
+    S.installingSkill = file.name; renderIfActive('station');
     try {
       const th = await this.req('/api/threads', {method:'POST', body: JSON.stringify({metadata:{purpose:'deer-blind skill install'}})});
       const tid = th.thread_id;
@@ -320,6 +325,7 @@ const Live = {
       await this.req('/api/skills/install', {method:'POST', body: JSON.stringify({thread_id: tid, path: vpath})});
       toast('Skill rack', file.name+' installed on gateway'); this.hydrate();
     } catch(e){ toast('Install failed', e.message, true); }
+    finally { S.installingSkill = null; renderIfActive('station'); }
   },
   async putMcp(cfg){ try { await this.req('/api/mcp/config',{method:'PUT',body:JSON.stringify(cfg)}); }
     catch(e){ toast('MCP','push failed — '+e.message, true); } },

@@ -193,6 +193,8 @@ select.input{appearance:none;padding-right:26px;
 .ops-list{border-right:1px solid var(--border-hair);display:flex;flex-direction:column;overflow:hidden}
 .ops-list-h{display:flex;align-items:center;gap:var(--s2);padding:var(--s4);padding-bottom:var(--s3)}
 .ops-list-h h2{font:600 13px/1 var(--f-body);flex:1}
+.ops-search{padding:0 var(--s3) var(--s2)}
+.ops-search .input{padding:4px 9px;font-size:12px}
 .ops-scroll{overflow-y:auto;flex:1;padding:0 var(--s2) var(--s4)}
 .thread-card{width:100%;text-align:left;padding:10px 12px;border-radius:8px;border:1px solid transparent;
   display:flex;flex-direction:column;gap:5px;transition:background .12s}
@@ -329,7 +331,10 @@ select.input{appearance:none;padding-right:26px;
 
 /* ---------- ARTIFACTS ---------- */
 .arts{display:grid;grid-template-columns:300px 1fr;height:100%}
-.arts-list{border-right:1px solid var(--border-hair);overflow-y:auto;padding:var(--s4) var(--s3)}
+.arts-side{display:flex;flex-direction:column;border-right:1px solid var(--border-hair);overflow:hidden}
+.arts-tools{display:flex;gap:8px;align-items:center;padding:var(--s3) var(--s3) var(--s2)}
+.arts-tools .input{padding:4px 9px;font-size:12px;flex:1;min-width:0}
+.arts-list{overflow-y:auto;flex:1;padding:0 var(--s3) var(--s4)}
 .arts-group{margin-bottom:var(--s4)}
 .arts-group .ag-h{font:600 9.5px/1 var(--f-mono);letter-spacing:.18em;text-transform:uppercase;
   color:var(--ink-3);padding:var(--s2);display:flex;gap:8px;align-items:baseline}

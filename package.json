@@ -1,13 +1,13 @@
 {
   "name": "deer-blind",
-  "version": "0.10.1",
+  "version": "0.11.0",
   "description": "Deer Blind — a field console for DeerFlow 2.0",
   "private": true,
   "type": "module",
   "license": "MIT",
   "scripts": {
     "dev": "vite",
-    "build": "vite build && node -e \"require('fs').copyFileSync('dist/index.html','deer-blind.html')\"",
+    "build": "node scripts/build.mjs",
     "check": "tsc --noEmit"
   },
   "devDependencies": {

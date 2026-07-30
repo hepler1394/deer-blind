@@ -12,6 +12,10 @@ const S: any = {
   feedFilter: 'all',
   feedQuery: '',
   selArtifact: null,
+  artQuery: '',
+  artView: 'preview',           // html artifacts: 'preview' | 'source'
+  threadQuery: '',
+  installingSkill: null,        // filename while a .skill archive is being scanned/installed
   pendingFiles: [],
   totalTokens: 0,
   models: [], skills: [], memory: null, mcp: null,

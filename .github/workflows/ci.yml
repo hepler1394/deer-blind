@@ -1,0 +1,22 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm run build
+      # the whole product is one file — fail the build if it isn't there and healthy
+      - run: node -e "const s=require('fs').statSync('deer-blind.html').size; if(s<100000) throw new Error('bundle too small: '+s); console.log('deer-blind.html ok:', s.toLocaleString(), 'bytes')"

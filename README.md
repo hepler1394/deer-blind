@@ -1,6 +1,8 @@
 # Deer Blind
 
-A field console for [DeerFlow 2.0](https://github.com/bytedance/deer-flow) — brief the lead agent, watch the herd work in live telemetry, read every artifact a run drops, and tune the station, all from one dark, quiet screen. Hand-built: no framework, no component library, hand-rolled SVG charts, real fonts inlined at build time.
+![ci](https://github.com/hepler1394/deer-blind/actions/workflows/ci.yml/badge.svg)
+
+A field console for [DeerFlow 2.0](https://github.com/bytedance/deer-flow) — brief the lead agent, watch the herd work in live telemetry, read every artifact a run drops, and tune the station, all from one dark, quiet screen. Hand-built: no framework, no component library, hand-rolled SVG charts (and a hand-rolled zip writer), real fonts inlined at build time.
 
 ## Just want to open it?
 
@@ -12,6 +14,8 @@ start-deer-blind.cmd
 
 That starts the whole stack: Ollama (if it isn't already running), the DeerFlow gateway in its own log window, and a local server for this folder on http://localhost:4173 — then it opens the console live. Mode, gateway URL, and model all live in the URL hash (`#gw=http://localhost:8001&mode=live`) — nothing is stored in the browser.
 
+Field notes: attach files to a brief by button, drag-and-drop, or paste; filter operations and artifacts from the sidebars; take the whole artifact tray home with **Zip all**; export any run's feed as text.
+
 ## The real project
 
 The console is a Vite + TypeScript project; the single file above is its build output, kept committed so the double-click path never dies.
@@ -19,9 +23,11 @@ The console is a Vite + TypeScript project; the single file above is its build o
 ```
 npm install
 npm run dev      # dev server on http://localhost:5173, hot reload
-npm run build    # builds dist/index.html and copies it to ./deer-blind.html
+npm run build    # scripts/build.mjs — Vite JS API + verified copy to ./deer-blind.html
 npm run check    # tsc --noEmit
 ```
+
+CI (GitHub Actions) typechecks and builds on every push and fails if the bundle comes out broken.
 
 ### Map
 
@@ -34,15 +40,16 @@ src/engine.ts         mock run scripting, run helpers, field-report export
 src/adapter.ts        Live — the DeerFlow gateway client (SSE, attach, watchdog)
 src/charts.ts         hand-rolled SVG charts, single hue, thin marks
 src/mockdata.ts       demo catalog + artifact bodies
-src/utils.ts          formatting, markdown, reasoning-stripper
+src/utils.ts          formatting, markdown, zip writer, reasoning-stripper
 src/hub.ts            late-bound render entry points + toasts (breaks import cycles)
 src/styles/app.css    the whole design system
 src/styles/fonts.css  @fontsource imports, inlined as base64 by the build
+scripts/build.mjs     build driver — no shell chaining, no silent half-builds
 ```
 
 ### Live mode
 
-The adapter speaks the gateway's native surface, verified against the deer-flow backend source: `POST /api/threads`, `POST /api/threads/{id}/runs/stream` (SSE), cancel / reattach / events / workspace-changes, plus `/api/models`, `/api/skills`, `/api/memory`, and `/api/mcp/config`. Details that cost real debugging: the run id arrives in the SSE `metadata` event (the `Content-Location` header is invisible cross-origin), a busy thread reports status `running` (the docs say `busy`), and qwen-style `<think>` blocks are folded into a REASONING disclosure instead of leaking into the reply.
+The adapter speaks the gateway's native surface, verified against the deer-flow backend source: `POST /api/threads`, `POST /api/threads/{id}/runs/stream` (SSE), cancel / reattach / events / workspace-changes, plus `/api/models`, `/api/skills`, `/api/memory`, and `/api/mcp/config`. Details that cost real debugging: the run id arrives in the SSE `metadata` event (the `Content-Location` header is invisible cross-origin), a busy thread reports status `running` (the docs say `busy`), qwen-style `<think>` blocks are folded into a REASONING disclosure instead of leaking into the reply, and skill installs must send the upload's `virtual_path` (`/mnt/user-data/…`) — the physical path is rejected. Installs sit behind a real LLM security scan on the gateway, so the Station button shows a scanning state instead of going quiet.
 
 The launcher starts the gateway for you. To run it by hand (Windows, no Docker — local sandbox + Ollama):
 
