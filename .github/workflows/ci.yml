@@ -18,5 +18,9 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm run build
-      # the whole product is one file — fail the build if it isn't there and healthy
-      - run: node -e "const s=require('fs').statSync('deer-blind.html').size; if(s<100000) throw new Error('bundle too small: '+s); console.log('deer-blind.html ok:', s.toLocaleString(), 'bytes')"
+      # the whole product is one file — fail the build if it isn't there and healthy.
+      # block-scalar (|) on purpose: the inline single-line form broke GitHub's YAML
+      # parser on the "too small: " colon-space inside the plain scalar ("mapping
+      # values are not allowed here") and silently produced zero jobs on every push.
+      - run: |
+          node -e "const s=require('fs').statSync('deer-blind.html').size; if(s<100000) throw new Error('bundle too small: '+s); console.log('deer-blind.html ok:', s.toLocaleString(), 'bytes')"
