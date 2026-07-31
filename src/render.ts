@@ -492,7 +492,92 @@ function antlerSVG(size){
    station
    ========================================================================= */
 function renderStation(){
-  renderModelsTab(); renderSkillsTab(); renderMemoryTab(); renderMcpTab();
+  renderModelsTab(); renderSkillsTab(); renderScheduleTab(); renderMemoryTab(); renderMcpTab();
+}
+/* ----- schedule: recurring + one-shot briefs the gateway runs on its own ----- */
+const CRON_PRESETS: [string, string][] = [
+  ['every morning 7:00', '0 7 * * *'],
+  ['weekdays 7:00', '0 7 * * 1-5'],
+  ['every hour', '0 * * * *'],
+  ['mondays 8:00', '0 8 * * 1'],
+];
+function humanCron(c: string): string {
+  const hit = CRON_PRESETS.find(([,expr])=>expr===c);
+  return hit ? hit[0] : c;
+}
+function renderScheduleTab(){
+  const el = $('#tab-sched'); if (!el) return;
+  const live = S.mode==='live' && S.liveOk;
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  const rows = (S.schedTasks||[]).map(t=>{
+    const sched = t.schedule_type==='cron' ? humanCron(t.schedule_spec?.cron||'') : 'once';
+    const next = t.next_run_at ? new Date(t.next_run_at).toLocaleString() : '—';
+    const last = t.last_run_at ? fmtAgo(+new Date(t.last_run_at)) : 'never';
+    const stCls = t.status==='running' ? 'run' : t.status==='paused' ? 'warn' : t.status==='completed' ? 'idle' : 'ok';
+    return `<div class="listrow">
+      <div class="lr-body">
+        <div class="lr-t">${esc(t.title)} <span class="tag">${esc(sched)}</span> ${statusChip(stCls, t.status.toUpperCase())}</div>
+        <div class="lr-d">${esc(String(t.prompt).slice(0,110))}${String(t.prompt).length>110?'…':''}</div>
+        <div class="lr-d" style="font-family:var(--f-mono);font-size:10.5px">next ${esc(next)} · last fired ${esc(last)} · ${t.run_count||0} run${(t.run_count||0)===1?'':'s'}${t.last_error?` · <span style="color:var(--crit)">last error: ${esc(String(t.last_error).slice(0,60))}</span>`:''}</div>
+      </div>
+      <button class="btn sm" data-sched-fire="${t.id}" title="Run it right now">Fire</button>
+      <button class="btn sm" data-sched-pause="${t.id}">${t.status==='paused'?'Resume':'Pause'}</button>
+      <button class="iconbtn" data-sched-del="${t.id}" title="Delete task" aria-label="Delete ${esc(t.title)}">
+        <svg width="13" height="13" viewBox="0 0 15 15" fill="none" aria-hidden="true"><path d="M2.5 4h10M6 4V2.5h3V4M4 4l.7 9h5.6L11 4M6.2 6.5v4M8.8 6.5v4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+      </button>
+    </div>`;
+  }).join('');
+  el.innerHTML = `
+    <div class="panel" style="margin-bottom:var(--s4)">
+      <div class="panel-h"><h3>Standing orders</h3><span class="ph-note" style="display:flex;gap:8px;align-items:center">GET /api/scheduled-tasks ${srcNote()}</span></div>
+      ${rows || `<div class="empty" style="padding:var(--s5) var(--s4)"><div class="e-title">Nothing scheduled</div>
+        <div class="e-sub">${live ? 'Set a standing order below — the gateway runs it on its own clock and the thread shows up in Operations, done, when you look.' : 'Live feature — connect a gateway under Connection first.'}</div></div>`}
+    </div>
+    ${live ? `
+    <div class="panel">
+      <div class="panel-h"><h3>New standing order</h3><span class="ph-note">runs on the gateway's default model</span></div>
+      <div style="padding:var(--s3) var(--s4) var(--s4);display:flex;flex-direction:column;gap:10px">
+        <input class="input" id="sched-title" placeholder="Name — e.g. Morning brief" aria-label="Task name">
+        <textarea class="input" id="sched-prompt" rows="3" placeholder="The brief to run — e.g. Search the web for overnight AI and open-model news. Write a 5-bullet morning brief with source links." aria-label="Task prompt" style="resize:vertical"></textarea>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <select class="input" id="sched-kind" aria-label="Schedule" style="width:auto">
+            ${CRON_PRESETS.map(([label,expr])=>`<option value="${esc(expr)}">${esc(label)}</option>`).join('')}
+            <option value="__custom">custom cron…</option>
+            <option value="__once">once, at a time I pick</option>
+          </select>
+          <input class="input" id="sched-cron" placeholder="m h dom mon dow" style="width:150px;display:none;font-family:var(--f-mono)" aria-label="Cron expression">
+          <input class="input" id="sched-once" type="datetime-local" style="width:auto;display:none" aria-label="Run once at">
+          <span style="font-size:11px;color:var(--ink-3)">${esc(tz)} time</span>
+          <button class="btn" id="sched-add" style="margin-left:auto">Post the order</button>
+        </div>
+      </div>
+    </div>` : ''}`;
+  if (!live) return;
+  const kind = $('#sched-kind'), cronIn = $('#sched-cron'), onceIn = $('#sched-once');
+  kind.addEventListener('change', ()=>{
+    cronIn.style.display = kind.value==='__custom' ? '' : 'none';
+    onceIn.style.display = kind.value==='__once' ? '' : 'none';
+  });
+  $('#sched-add').addEventListener('click', ()=>{
+    const title = $('#sched-title').value.trim();
+    const prompt = $('#sched-prompt').value.trim();
+    if (!title || !prompt){ toast('Schedule','a standing order needs a name and a brief', true); return; }
+    let payload;
+    if (kind.value==='__once'){
+      const v = onceIn.value; if (!v){ toast('Schedule','pick a time for the one-shot', true); return; }
+      /* aware-UTC ISO — see adapter.schedCreate for why */
+      const runAt = new Date(v).toISOString().replace(/\.\d{3}Z$/, '+00:00');
+      payload = { title, prompt, schedule_type:'once', schedule_spec:{ run_at: runAt }, timezone:'UTC' };
+    } else {
+      const cron = kind.value==='__custom' ? cronIn.value.trim() : kind.value;
+      if (!cron){ toast('Schedule','give the custom cron five fields', true); return; }
+      payload = { title, prompt, schedule_type:'cron', schedule_spec:{ cron }, timezone: tz };
+    }
+    Live.schedCreate(payload).catch(e=>toast('Schedule', e.message, true));
+  });
+  $$('[data-sched-fire]', el).forEach(b=>b.addEventListener('click',()=>{ const t=S.schedTasks.find(x=>x.id===b.dataset.schedFire); if (t) Live.schedTrigger(t); }));
+  $$('[data-sched-pause]', el).forEach(b=>b.addEventListener('click',()=>{ const t=S.schedTasks.find(x=>x.id===b.dataset.schedPause); if (t) Live.schedPause(t); }));
+  $$('[data-sched-del]', el).forEach(b=>b.addEventListener('click',()=>{ const t=S.schedTasks.find(x=>x.id===b.dataset.schedDel); if (t) Live.schedDelete(t); }));
 }
 function srcNote(){
   return S.mode==='live' && S.liveOk
@@ -608,4 +693,4 @@ function renderMcpTab(){
 }
 
 
-export { setView, renderIfActive, renderView, renderAll, statusChip, renderNavCounts, renderTop, renderStrip, renderOps, renderChat, renderComposer, deleteThread, renderPending, addPendingFiles, dispatch, renderTele, renderFeedLines, allArtifacts, renderArts, zipAllArtifacts, fileIcon, antlerSVG, renderStation };
+export { setView, renderIfActive, renderView, renderAll, statusChip, renderNavCounts, renderTop, renderStrip, renderOps, renderChat, renderComposer, deleteThread, renderPending, addPendingFiles, dispatch, renderTele, renderFeedLines, allArtifacts, renderArts, zipAllArtifacts, fileIcon, antlerSVG, renderStation, renderScheduleTab };

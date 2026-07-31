@@ -114,6 +114,21 @@ interface MemoryView {
   stats: { entries?: number; lastReload?: number | null; store?: string };
 }
 
+interface ScheduledTask {
+  id: string;
+  title: string;
+  prompt: string;
+  schedule_type: 'once' | 'cron';
+  schedule_spec: { cron?: string; run_at?: string };
+  timezone: string;
+  status: string;            // enabled | paused | running | completed | …
+  next_run_at?: string | null;
+  last_run_at?: string | null;
+  last_thread_id?: string | null;
+  last_error?: string | null;
+  run_count?: number;
+}
+
 interface AppState {
   mode: FeedMode;
   gatewayUrl: string;
@@ -134,6 +149,7 @@ interface AppState {
   totalTokens: number;
   models: ModelInfo[];
   skills: SkillInfo[];
+  schedTasks: ScheduledTask[];
   memory: MemoryView | null;
   mcp: unknown;                // gateway MCP config JSON, edited as text
   composerModel: string | null;
@@ -160,10 +176,10 @@ const S: AppState = {
   installingSkill: null,
   pendingFiles: [],
   totalTokens: 0,
-  models: [], skills: [], memory: null, mcp: null,
+  models: [], skills: [], schedTasks: [], memory: null, mcp: null,
   composerModel: null, composerSkills: new Set(['deep-research']),
   timers: new Set(),
 };
 
 export { S };
-export type { AppState, Thread, Message, Upload, Run, AgentRow, FeedEvent, Artifact, ArtifactType, ModelInfo, SkillInfo, MemoryView, Status, EventKind };
+export type { AppState, ScheduledTask, Thread, Message, Upload, Run, AgentRow, FeedEvent, Artifact, ArtifactType, ModelInfo, SkillInfo, MemoryView, Status, EventKind };

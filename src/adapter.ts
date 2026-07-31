@@ -55,6 +55,9 @@ const Live = {
         stats: { entries: (mem.facts||[]).length, lastReload: mem.lastUpdated ? +new Date(mem.lastUpdated) : null, store: 'gateway rev '+(mem.revision??'—') } };
     } catch(e){ note('memory', e); }
     try { S.mcp = await this.req('/api/mcp/config'); } catch(e){ note('mcp', e); }
+    try { const st = await this.req('/api/scheduled-tasks');
+      S.schedTasks = Array.isArray(st) ? st : [];
+    } catch(e){ note('scheduled-tasks', e); }
     await this.hydrateThreads();
     renderAll();
   },
@@ -322,6 +325,39 @@ const Live = {
       pushEvent(run,'gateway','err','re-attach failed: '+e.message);
     }
     renderAll();
+  },
+  async schedRefresh(){
+    try { const st = await this.req('/api/scheduled-tasks');
+      S.schedTasks = Array.isArray(st) ? st : [];
+      renderIfActive('station');
+    } catch(e){ note('scheduled-tasks', e); }
+  },
+  async schedCreate(payload){
+    /* once run_at must be aware-UTC: the gateway stores datetimes naively and
+       reads them back as UTC, so a local-zone once fires hours early. Cron is
+       computed to UTC before storage upstream, so any IANA timezone is safe. */
+    await this.req('/api/scheduled-tasks', {method:'POST', body: JSON.stringify(payload)});
+    toast('Schedule', payload.title+' is on the calendar');
+    this.schedRefresh();
+  },
+  async schedDelete(t){
+    try { await this.req('/api/scheduled-tasks/'+t.id, {method:'DELETE'});
+      toast('Schedule', t.title+' deleted'); }
+    catch(e){ toast('Schedule', e.message.includes('409') ? 'task is mid-run — try again when it finishes' : e.message, true); }
+    this.schedRefresh();
+  },
+  async schedPause(t){
+    const verb = (t.status==='paused') ? 'resume' : 'pause';
+    try { await this.req(`/api/scheduled-tasks/${t.id}/${verb}`, {method:'POST'});
+      toast('Schedule', `${t.title} ${verb}d`); }
+    catch(e){ toast('Schedule', e.message, true); }
+    this.schedRefresh();
+  },
+  async schedTrigger(t){
+    try { await this.req(`/api/scheduled-tasks/${t.id}/trigger`, {method:'POST'});
+      toast('Schedule', t.title+' fired — watch Operations for the thread'); }
+    catch(e){ toast('Schedule', e.message, true); }
+    this.schedRefresh();
   },
   async putSkill(s){
     try { await this.req('/api/skills/'+encodeURIComponent(s.id), {method:'PUT', body: JSON.stringify({enabled:s.enabled})}); }
