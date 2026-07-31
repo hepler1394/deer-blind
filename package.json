@@ -8,12 +8,14 @@
   "scripts": {
     "dev": "vite",
     "build": "node scripts/build.mjs",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "test": "vitest run"
   },
   "devDependencies": {
     "typescript": "7.0.2",
     "vite": "8.1.5",
-    "vite-plugin-singlefile": "2.3.3"
+    "vite-plugin-singlefile": "2.3.3",
+    "vitest": "^3.2.4"
   },
   "dependencies": {
     "@fontsource/archivo-black": "5.2.5",

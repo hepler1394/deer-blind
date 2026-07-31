@@ -17,6 +17,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
+      - run: npm test
       - run: npm run build
       # the whole product is one file — fail the build if it isn't there and healthy.
       # block-scalar (|) on purpose: the inline single-line form broke GitHub's YAML
