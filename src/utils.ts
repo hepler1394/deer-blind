@@ -18,6 +18,14 @@ function mulberry(seed){ return function(){ let t = seed += 0x6D2B79F5;
   return ((t ^ t>>>14) >>> 0) / 4294967296; }; }
 const debounce=(fn,ms)=>{let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms)}};
 
+/* media sniffing - one shared answer to "can the console show this inline?" */
+const IMG_EXTS = ['png','jpg','jpeg','gif','webp','svg','bmp'];
+const VID_EXTS = ['mp4','webm','mov','m4v','mkv','avi'];
+const mediaKind = (name): 'img'|'video'|null => {
+  const e = (String(name).split('.').pop()||'').toLowerCase();
+  return IMG_EXTS.includes(e) ? 'img' : VID_EXTS.includes(e) ? 'video' : null;
+};
+
 /* markdown, the 5%-of-commonmark-you-actually-need edition */
 function md(src){
   src = String(src).replace(/\r\n/g,'\n');
@@ -116,4 +124,4 @@ function stripThink(s){
 }
 
 
-export { $, $$, esc, fmtTok, fmtNum, fmtBytes, fmtClock, fmtT, fmtAgo, fmtDur, mulberry, debounce, md, stripThink, crc32, makeZip };
+export { $, $$, esc, fmtTok, fmtNum, fmtBytes, fmtClock, fmtT, fmtAgo, fmtDur, mulberry, debounce, md, stripThink, crc32, makeZip, mediaKind };

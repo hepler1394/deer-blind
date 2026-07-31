@@ -1,6 +1,6 @@
 // adapter.ts — Live: verified against the deer-flow backend source
 import { S } from './state';
-import { $, fmtNum, stripThink } from './utils';
+import { $, fmtNum, stripThink, mediaKind } from './utils';
 import { nid, mkRun, mkAgent, art, pushEvent } from './engine';
 import { renderAll, renderIfActive, renderStrip, renderNavCounts, renderChat, renderOps, renderTop, toast, note, pushToastOnce } from './hub';
 /* =========================================================================
@@ -74,9 +74,23 @@ const Live = {
       for (const t of S.threads){ if (t.live && t.status==='run') this.loadRuns(t); }
     } catch(e){ note('threads-search', e); }
   },
+  async loadUploads(t){
+    /* what's in the thread's field bag — images thumbnail in the chat panel */
+    if (!t.remoteId || t._upsPulled) return; t._upsPulled = true;
+    try {
+      const r = await this.req(`/api/threads/${t.remoteId}/uploads/list`);
+      const fs = r.files||[];
+      if (fs.length){
+        t.uploads = fs.map(f=>({ name: f.filename, size: f.size||0,
+          url: this.base()+(f.artifact_url || `/api/threads/${t.remoteId}/artifacts/mnt/user-data/uploads/${encodeURIComponent(f.filename)}`) }));
+        renderChat();
+      }
+    } catch(e){ note('uploads-list', e); }
+  },
   async loadThread(t){
     /* lazy-load a gateway thread's message history on first open */
     this.loadRuns(t);
+    this.loadUploads(t);
     try {
       const msgs = await this.req(`/api/threads/${t.remoteId}/messages?limit=60`);
       const out = [];
@@ -246,12 +260,17 @@ const Live = {
         pushEvent(run,'gateway','info','workspace: '+p);
         const name = p.split('/').pop();
         const ext = (name.split('.').pop()||'').toLowerCase();
-        const type = ext==='md'?'md':ext==='html'?'html':'json';
-        let body = `(file lives on the gateway)\n\nGET ${this.base()}/api/threads/${t.remoteId}/artifacts/${p}`;
-        try { if (['md','txt','json','html','csv'].includes(ext)){
+        const gwUrl = this.base()+`/api/threads/${t.remoteId}/artifacts/${encodeURI(p)}`;
+        /* images/videos render straight off the gateway — no body fetch */
+        const media = mediaKind(name);
+        const type = media || (ext==='md'?'md':ext==='html'?'html':'json');
+        let body = `(file lives on the gateway)\n\nGET ${gwUrl}`;
+        try { if (!media && ['md','txt','json','html','csv'].includes(ext)){
           const raw = await this.req(`/api/threads/${t.remoteId}/artifacts/${encodeURI(p)}`);
           body = typeof raw==='string' ? raw : JSON.stringify(raw,null,2); } } catch(_){}
-        run.artifacts.push({...art(name, type, body, t.id), gwPath: p});
+        const a = {...art(name, type, body, t.id), gwPath: p, gwUrl};
+        if (media && typeof f.size_after==='number') a.bytes = f.size_after;
+        run.artifacts.push(a);
       }
       if (files.length){ toast('Artifacts', files.length+' file'+(files.length===1?'':'s')+' pulled from the gateway'); renderNavCounts(); renderIfActive('arts'); }
     } catch(e){ note('workspace-changes', e); }
@@ -265,11 +284,16 @@ const Live = {
     for (const p of paths.slice(0, 30)){
       const name = p.split('/').pop();
       const ext = (name.split('.').pop()||'').toLowerCase();
-      const type = ext==='md'?'md':ext==='html'?'html':'json';
+      const gwUrl = this.base()+`/api/threads/${t.remoteId}/artifacts${encodeURI(p)}`;
+      const media = mediaKind(name);
+      const type = media || (ext==='md'?'md':ext==='html'?'html':'json');
       try {
-        const raw = await this.req(`/api/threads/${t.remoteId}/artifacts${encodeURI(p)}`);
-        const body = typeof raw==='string' ? raw : JSON.stringify(raw, null, 2);
-        run.artifacts.push({...art(name, type, body, t.id), gwPath: p});
+        let body = `(binary media on the gateway)\n\nGET ${gwUrl}`;
+        if (!media){
+          const raw = await this.req(`/api/threads/${t.remoteId}/artifacts${encodeURI(p)}`);
+          body = typeof raw==='string' ? raw : JSON.stringify(raw, null, 2);
+        }
+        run.artifacts.push({...art(name, type, body, t.id), gwPath: p, gwUrl});
         pushEvent(run, 'gateway', 'info', 'presented: '+p); pulled++;
       } catch(_){
         pushEvent(run, 'gateway', 'warn', 'agent presented a file the gateway cannot find: '+p);
@@ -367,7 +391,7 @@ const Live = {
         method:'POST', credentials:'include', headers:this.headers(),
         body: JSON.stringify({
           input:{ messages:[{role:'user', content:brief}] },
-          /* 'messages-tuple' is the 2026-07 gateway's name for token streaming -
+          /* 'messages-tuple' is the 2026-07 gateway's name for token streaming —
              plain 'messages' now 422s at validation. The SSE events it emits are
              still named 'messages', so consumeSSE stays as-is. */
           stream_mode:['values','messages-tuple'],

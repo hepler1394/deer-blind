@@ -1,6 +1,6 @@
 // render.ts — every view renderer + dispatch
 import { S } from './state';
-import { $, $$, esc, fmtTok, fmtNum, fmtBytes, fmtT, fmtAgo, fmtDur, md, stripThink, makeZip } from './utils';
+import { $, $$, esc, fmtTok, fmtNum, fmtBytes, fmtT, fmtAgo, fmtDur, md, stripThink, makeZip, mediaKind } from './utils';
 import { MOCK_MODELS, MOCK_SKILLS, MOCK_MEMORY, MOCK_MCP } from './mockdata';
 import { nid, pushEvent, startMockRun, stopRun, fieldReport } from './engine';
 import { sparkSVG, tokChartSVG, wireTokChart } from './charts';
@@ -116,7 +116,17 @@ function renderChat(){
   const watch = $('#btn-watch'); if (watch) watch.addEventListener('click',()=>{ S.watchRunId = run.id; setView('tele'); });
   $('#btn-del-thread').addEventListener('click',()=>deleteThread(t));
   const nn = $('#btn-new-narrow'); if (nn) nn.addEventListener('click',()=>{ S.activeThreadId=null; renderOps(); $('#composer-input').focus(); });
-  scroll.innerHTML = t.messages.map((m,i)=>{
+  /* the field bag — files riding on this thread, images shown as thumbnails */
+  const bag = (t.uploads||[]).length ? `<div class="up-strip" role="group" aria-label="Files on this thread">`+
+    t.uploads.map(u=>{
+      const k = mediaKind(u.name);
+      if (k==='img') return `<a class="up-thumb" href="${esc(u.url)}" target="_blank" rel="noopener" title="${esc(u.name)} · ${fmtBytes(u.size)}"><img src="${esc(u.url)}" alt="${esc(u.name)}" loading="lazy"></a>`;
+      const glyph = k==='video'
+        ? '<svg width="11" height="11" viewBox="0 0 15 15" fill="none" aria-hidden="true"><path d="M4.5 3.5v8l7-4z" fill="currentColor"/></svg>'
+        : '<svg width="11" height="11" viewBox="0 0 15 15" fill="none" aria-hidden="true"><path d="M9 2.5H5A1.5 1.5 0 0 0 3.5 4v7A1.5 1.5 0 0 0 5 12.5h5A1.5 1.5 0 0 0 11.5 11V5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>';
+      return `<a class="up-chip" href="${esc(u.url)}" target="_blank" rel="noopener">${glyph}<span class="uc-name">${esc(u.name)}</span><span class="uc-size">${fmtBytes(u.size)}</span></a>`;
+    }).join('')+`</div>` : '';
+  scroll.innerHTML = bag + t.messages.map((m,i)=>{
     if (m.who==='you') return `<div class="msg user"><div class="m-who">YOU · ${fmtT(m.ts)}${S.mode==='live'&&S.liveOk?` <button class="iconbtn msg-reask" data-mi="${i}" title="Re-ask on a fresh thread with the selected model" aria-label="Re-ask" style="width:20px;height:20px"><svg width="11" height="11" viewBox="0 0 15 15" fill="none" aria-hidden="true"><path d="M2.5 7.5a5 5 0 1 1 1.5 3.6M2.5 11.5v-3h3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`:''}</div><div class="m-body">${esc(m.body)}</div></div>`;
     const thinkBlock = m.think ? `<details style="margin-top:7px"><summary style="cursor:pointer;font:600 10px var(--f-mono);letter-spacing:.1em;color:var(--ink-3)">REASONING</summary><div style="font-size:12px;color:var(--ink-3);line-height:1.55;padding:6px 0 0;border-left:2px solid var(--border-strong);padding-left:10px;margin-top:6px">${esc(m.think).replace(/\n/g,'<br>')}</div></details>` : '';
     return `<div class="msg agent"><div class="m-who"><span style="color:${m.err?'var(--crit)':'var(--series)'}">ATLAS</span> · lead · ${fmtT(m.ts)}${m.dur?` · ${fmtDur(m.dur)}`:''} <button class="iconbtn msg-copy" data-mi="${i}" title="Copy message" aria-label="Copy message" style="width:20px;height:20px"><svg width="11" height="11" viewBox="0 0 15 15" fill="none" aria-hidden="true"><rect x="5" y="5" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M10 5V3.5A1.5 1.5 0 0 0 8.5 2h-5A1.5 1.5 0 0 0 2 3.5v5A1.5 1.5 0 0 0 3.5 10H5" stroke="currentColor" stroke-width="1.4"/></svg></button></div><div class="m-body">${md(m.body)}${thinkBlock}</div></div>`;
@@ -202,6 +212,11 @@ function dispatch(){
     (async ()=>{
       if (files.length){
         try { const up = await Live.uploadToThread(t, files);
+          /* straight into the field bag so thumbnails show without a refetch */
+          t.uploads = t.uploads || [];
+          for (const f of up) t.uploads.push({ name: f.filename, size: f.size||0,
+            url: S.gatewayUrl.replace(/\/+$/,'')+(f.artifact_url || `/api/threads/${t.remoteId}/artifacts/mnt/user-data/uploads/${encodeURIComponent(f.filename)}`) });
+          t._upsPulled = true;
           toast('Uploaded', files.length+' file'+(files.length===1?'':'s')+' on the thread'); }
         catch(e){ toast('Upload failed', e.message, true); }
       }
@@ -369,16 +384,18 @@ function artsFiltered(){
 }
 function zipAllArtifacts(){
   const groups = artsFiltered();
-  const files = []; const used = new Set();
+  const files = []; const used = new Set(); let skippedMedia = 0;
   for (const g of groups){
     const dir = (g.thread.title||'thread').replace(/[^\w\- ]+/g,'').trim().replace(/\s+/g,'-').slice(0,40) || 'thread';
     for (const a of g.arts){
+      /* media bodies are placeholders — zipping them would bag garbage */
+      if (a.type==='img' || a.type==='video'){ skippedMedia++; continue; }
       let n = `${dir}/${a.name}`, i = 2;
       while (used.has(n)){ n = `${dir}/${i}-${a.name}`; i++; }
       used.add(n); files.push({name:n, data:a.body});
     }
   }
-  if (!files.length){ toast('Artifacts','nothing to zip on this filter', true); return; }
+  if (!files.length){ toast('Artifacts', skippedMedia?'only media on this filter — open items and use Download instead':'nothing to zip on this filter', true); return; }
   const u = URL.createObjectURL(makeZip(files));
   const link = document.createElement('a'); link.href=u; link.download='deer-blind-artifacts.zip'; link.click();
   setTimeout(()=>URL.revokeObjectURL(u), 5000);
@@ -414,15 +431,18 @@ function renderArts(){
 
   const a = flat.find(x=>x.id===S.selArtifact);
   const isHtml = a.type==='html';
+  const isMedia = a.type==='img' || a.type==='video';
   const viewChips = isHtml ? `
     <button class="f-chip" data-av="preview" aria-pressed="${S.artView!=='source'}">preview</button>
     <button class="f-chip" data-av="source" aria-pressed="${S.artView==='source'}">source</button>` : '';
   const openTab = isHtml ? `<button class="btn sm" id="btn-tab-art" title="Open unsandboxed in a new tab">Open in tab</button>` : '';
-  const liveLink = S.mode==='live' && S.liveOk
-    ? `<a class="btn sm" style="text-decoration:none" href="${S.gatewayUrl}/api/threads/${a.threadId}/artifacts/${encodeURIComponent(a.name)}" target="_blank" rel="noopener">Open on gateway</a>` : '';
+  const liveLink = S.mode==='live' && S.liveOk && (a.gwUrl || a.gwPath || !isMedia)
+    ? `<a class="btn sm" style="text-decoration:none" href="${esc(a.gwUrl || S.gatewayUrl+'/api/threads/'+a.threadId+'/artifacts/'+encodeURIComponent(a.name))}" target="_blank" rel="noopener">Open on gateway</a>` : '';
   let bodyHtml;
   if (a.type==='md') bodyHtml = `<div class="arts-body pad"><div class="md-doc">${md(a.body)}</div></div>`;
   else if (isHtml && S.artView!=='source') bodyHtml = `<div class="arts-body"><iframe sandbox="" title="${esc(a.name)} preview" srcdoc="${esc(a.body)}"></iframe></div>`;
+  else if (a.type==='img' && a.gwUrl) bodyHtml = `<div class="arts-body media"><img class="art-media" src="${esc(a.gwUrl)}" alt="${esc(a.name)}"></div>`;
+  else if (a.type==='video' && a.gwUrl) bodyHtml = `<div class="arts-body media"><video class="art-media" controls preload="metadata" src="${esc(a.gwUrl)}"></video></div>`;
   else bodyHtml = `<div class="arts-body"><div class="code-doc">${esc(a.body)}</div></div>`;
   viewEl.innerHTML = `
     <div class="arts-view-h">${fileIcon(a.type)}<span class="av-name">${esc(a.name)}</span>
@@ -435,16 +455,30 @@ function renderArts(){
     window.open(u, '_blank'); setTimeout(()=>URL.revokeObjectURL(u), 10000);
   });
   $('#btn-copy-art').addEventListener('click',()=>{
-    navigator.clipboard.writeText(a.body).then(()=>toast('Copied', a.name+' on the clipboard'))
+    /* for media the useful thing on the clipboard is the URL, not placeholder text */
+    const text = isMedia && a.gwUrl ? a.gwUrl : a.body;
+    navigator.clipboard.writeText(text).then(()=>toast('Copied', (isMedia?'gateway URL':a.name)+' on the clipboard'))
       .catch(()=>toast('Copy failed','clipboard is blocked in this context', true));
   });
-  $('#btn-dl-art').addEventListener('click',()=>{
+  $('#btn-dl-art').addEventListener('click', async ()=>{
+    if (isMedia && a.gwUrl){
+      /* pull the real bytes off the gateway (CORS is allow-listed) */
+      try {
+        const res = await fetch(a.gwUrl, {credentials:'include'});
+        if (!res.ok) throw new Error(res.status+' '+res.statusText);
+        const u = URL.createObjectURL(await res.blob()); const link = document.createElement('a');
+        link.href=u; link.download=a.name; link.click(); setTimeout(()=>URL.revokeObjectURL(u), 5000);
+      } catch(e){ toast('Download failed', e.message+' — opening on the gateway instead', true); window.open(a.gwUrl, '_blank'); }
+      return;
+    }
     const blob = new Blob([a.body], {type: a.type==='html'?'text/html':a.type==='json'?'application/json':'text/markdown'});
     const u = URL.createObjectURL(blob); const link = document.createElement('a');
     link.href=u; link.download=a.name; link.click(); setTimeout(()=>URL.revokeObjectURL(u), 5000);
   });
 }
 function fileIcon(type){
+  if (type==='img') return `<svg width="14" height="14" viewBox="0 0 15 15" fill="none" aria-hidden="true"><rect x="2" y="2.5" width="11" height="10" rx="1.2" stroke="currentColor" stroke-width="1.3"/><circle cx="5.2" cy="5.7" r="1" fill="currentColor"/><path d="M2.5 11l3.2-3.4 2.4 2.4 2-2 2.4 3" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>`;
+  if (type==='video') return `<svg width="14" height="14" viewBox="0 0 15 15" fill="none" aria-hidden="true"><rect x="2" y="2.5" width="11" height="10" rx="1.2" stroke="currentColor" stroke-width="1.3"/><path d="M6.2 5.2v4.6l3.8-2.3z" fill="currentColor"/></svg>`;
   const c = type==='html' ? 'M2 4l3 3.5L2 11M7 11h5' : type==='json' ? 'M5 2C3.5 2 4.5 7.5 3 7.5 4.5 7.5 3.5 13 5 13M10 2c1.5 0 .5 5.5 2 5.5-1.5 0-.5 5.5-2 5.5' : 'M3 3h9M3 6h9M3 9h6';
   return `<svg width="14" height="14" viewBox="0 0 15 15" fill="none" aria-hidden="true"><path d="${c}" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 }
