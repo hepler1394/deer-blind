@@ -367,7 +367,10 @@ const Live = {
         method:'POST', credentials:'include', headers:this.headers(),
         body: JSON.stringify({
           input:{ messages:[{role:'user', content:brief}] },
-          stream_mode:['values','messages'],
+          /* 'messages-tuple' is the 2026-07 gateway's name for token streaming -
+             plain 'messages' now 422s at validation. The SSE events it emits are
+             still named 'messages', so consumeSSE stays as-is. */
+          stream_mode:['values','messages-tuple'],
           stream_subgraphs:true,
           context:{ model_name: S.composerModel },
         }) });

@@ -5,7 +5,7 @@ param([switch]$NoOpen)
 $ErrorActionPreference = 'SilentlyContinue'
 Remove-Item Env:VIRTUAL_ENV -ErrorAction SilentlyContinue   # scrub inherited venvs (silences a uv warning)
 $root     = Split-Path -Parent $MyInvocation.MyCommand.Path
-$deerflow = 'D:\Dev\GitHub\deer-flow'
+$deerflow = Join-Path (Split-Path -Parent $root) 'deer-flow'   # sibling folder under D:\Dev\GitHub\Deer
 $uv       = 'C:\Users\Cory\.local\bin\uv.exe'
 if (-not (Test-Path $uv)) { $uv = 'uv' }
 
